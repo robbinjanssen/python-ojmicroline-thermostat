@@ -1,4 +1,4 @@
-"""Models for Open Data Platform of Amsterdam."""
+"""GroupRequest model for OJ Microline Thermostat."""
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,4 +1,4 @@
-"""Models for Open Data Platform of Amsterdam."""
+"""Thermostat model for OJ Microline Thermostat."""
 from __future__ import annotations
 from .schedule import Schedule
 from datetime import datetime

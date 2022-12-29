@@ -1,4 +1,4 @@
-Asynchronous Python client controlling a OJ Microline Thermostats
+Asynchronous Python client controlling an OJ Microline Thermostat.
 
 ## About
 

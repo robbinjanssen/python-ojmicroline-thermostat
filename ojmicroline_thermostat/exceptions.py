@@ -1,4 +1,4 @@
-"""Asynchronous Python client providing Open Data information of Amsterdam."""
+"""Asynchronous Python client controlling an OJ Microline Thermostat."""
 
 
 class OJMicrolineError(Exception):
