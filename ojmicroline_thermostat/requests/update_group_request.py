@@ -54,12 +54,12 @@ class UpdateGroupRequest:
         if regulation_mode == REGULATION_COMFORT:
             comfort_end_time = (datetime.today() + timedelta(hours=4))
         else:
-            comfort_end_time = self.resource["comfort_end_time"]
+            comfort_end_time = self.resource.comfort_end_time
 
         if regulation_mode == REGULATION_BOOST:
             boost_end_time = (datetime.today() + timedelta(hours=1))
         else:
-            boost_end_time = self.resource["boost_end_time"]
+            boost_end_time = self.resource.boost_end_time
 
         return {
             "APIKEY": self.api_key,
@@ -75,8 +75,8 @@ class UpdateGroupRequest:
                 "RegulationMode": regulation_mode,
                 "Schedule": self.resource.schedule,
                 "VacationEnabled": self.resource.vacation_enabled,
-                "VacationBeginDay": self.resource["vacation_begin_time"].strftime("%Y-%m-%dT%H:%M:%S"),  # noqa: E501
-                "VacationEndDay": self.resource["vacation_end_time"].strftime("%Y-%m-%dT%H:%M:%S"),  # noqa: E501
+                "VacationBeginDay": self.resource.vacation_begin_time.strftime("%Y-%m-%dT%H:%M:%S"),  # noqa: E501
+                "VacationEndDay": self.resource.vacation_end_time.strftime("%Y-%m-%dT%H:%M:%S"),  # noqa: E501
                 "VacationTemperature": self.resource.temperatures[REGULATION_VACATION],  # noqa: E501
             }
         }
