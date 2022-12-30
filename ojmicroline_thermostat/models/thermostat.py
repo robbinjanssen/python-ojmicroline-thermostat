@@ -22,7 +22,7 @@ from ..const import (
 )
 
 
-@ dataclass
+@dataclass
 class Thermostat:
     """Object representing a Thermostat model response from the API."""
 
@@ -47,11 +47,14 @@ class Thermostat:
     min_temperature: int
     max_temperature: int
     temperatures: dict[int, int]
-    dates: dict[str, datetime]
+    boost_end_time: datetime
+    comfort_end_time: datetime
+    vacation_begin_time: datetime
+    vacation_end_time: datetime
     offset: int
     schedule: dict[Any]
 
-    @ classmethod
+    @classmethod
     def from_json(cls, data: dict[Any]) -> Thermostat:
         """
         Return a new Thermostat instance based on the given JSON.
@@ -88,6 +91,12 @@ class Thermostat:
             temperature_room=data["RoomTemperature"],
             min_temperature=data["MinSetpoint"],
             max_temperature=data["MaxSetpoint"],
+            boost_end_time=parse_date(data["BoostEndTime"], time_zone),
+            comfort_end_time=parse_date(data["ComfortEndTime"], time_zone),
+            vacation_begin_time=parse_date(data["VacationBeginDay"], time_zone),
+            vacation_end_time=parse_date(data["VacationEndDay"], time_zone),
+            offset=time_zone,
+            schedule=data["Schedule"],
             temperatures={
                 REGULATION_SCHEDULE: schedule.get_active_temperature(),
                 REGULATION_COMFORT: data["ComfortSetpoint"],
@@ -97,14 +106,6 @@ class Thermostat:
                 REGULATION_BOOST: data["MaxSetpoint"],
                 REGULATION_ECO: schedule.get_lowest_temperature(),
             },
-            dates={
-                "boost_end_time": parse_date(data["BoostEndTime"], time_zone),
-                "comfort_end_time": parse_date(data["ComfortEndTime"], time_zone),
-                "vacation_begin_time": parse_date(data["VacationBeginDay"], time_zone),
-                "vacation_end_time": parse_date(data["VacationEndDay"], time_zone),
-            },
-            offset=time_zone,
-            schedule=data["Schedule"],
         )
 
     def get_target_temperature(cls) -> int:

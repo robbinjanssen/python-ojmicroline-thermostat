@@ -1,9 +1,11 @@
 """Asynchronous Python client controlling an OJ Microline Thermostat."""
 
 from .exceptions import (
-    OJMicrolineConnectionError,
-    OJMicrolineError,
-    OJMicrolineResultsError,
+    OJMicrolineException,
+    OJMicrolineAuthException,
+    OJMicrolineConnectionException,
+    OJMicrolineResultsException,
+    OJMicrolineTimeoutException,
 )
 from .models import Thermostat
 from .ojmicroline import OJMicroline
@@ -11,7 +13,9 @@ from .ojmicroline import OJMicroline
 __all__ = [
     "Thermostat",
     "OJMicroline",
-    "OJMicrolineError",
-    "OJMicrolineResultsError",
-    "OJMicrolineConnectionError",
+    "OJMicrolineException",
+    "OJMicrolineAuthException",
+    "OJMicrolineConnectionException",
+    "OJMicrolineResultsException",
+    "OJMicrolineTimeoutException",
 ]

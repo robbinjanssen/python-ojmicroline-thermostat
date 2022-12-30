@@ -12,7 +12,7 @@ class Schedule:
 
     days: list[dict[Any]]
 
-    @ classmethod
+    @classmethod
     def from_json(cls, data: dict[Any]) -> Schedule:
         """
         Return a new Schedule instance based on the given JSON.
