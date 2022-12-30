@@ -99,8 +99,8 @@ class OJMicroline:
             the API.
 
         Raises:
-            OJMicrolineConnectionException: An error occurred while communicating
-                                        with the API.
+            OJMicrolineTimeoutException: A timeout occurred.
+            OJMicrolineConnectionException: An error occurred.
             OJMicrolineException: Received an unexpected response from the API.
         """
         try:
@@ -148,7 +148,7 @@ class OJMicroline:
         Get a valid session to do requests with the OJ Microline API.
 
         Raises:
-            OJMicrolineConnectionException: An error occured while logging in.
+            OJMicrolineAuthException: An error occured while authenticating.
         """
 
         if self.__session_calls_left == 0 or self.__session_id is None:
@@ -183,7 +183,7 @@ class OJMicroline:
             A list of Thermostats objects.
 
         Raises:
-            OJMicrolineException: An error occured while getting thermostats.
+            OJMicrolineResultsException: An error occured while getting thermostats.
         """
         await self.login()
 
