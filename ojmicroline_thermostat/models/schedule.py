@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 @dataclass
 class Schedule:
     """Object representing a schedule from a thermostat group."""
 
-    days: list[dict[Any]]
+    days: list[dict[Any]] | None = None
 
     @classmethod
     def from_json(cls, data: dict[Any]) -> Schedule:
@@ -24,8 +24,9 @@ class Schedule:
             A Schedule Object.
         """
 
-        result = []
+        result = {}
         now = datetime.now()
+        current_day = now.weekday()
         for item in data["Days"]:
             # Define the week days.
             if item["WeekDayGrpNo"] == 0:
@@ -37,9 +38,11 @@ class Schedule:
 
             # Get the events.
             events = []
+
             for event in item["Events"]:
                 if event["Active"] is True:
                     hour, minute, second = event["Clock"].split(':')
+
                     events.append({
                         "temperature": event["Temperature"],
                         "date": datetime(
@@ -51,11 +54,9 @@ class Schedule:
                             int(second),
                             now.microsecond,
                             now.tzinfo,
-                        ),
+                        ) + timedelta(days=(day - current_day)),
                     })
-
-            result.insert(day, events)
-
+            result[day] = events
         return cls(
             days=result
         )
@@ -73,7 +74,7 @@ class Schedule:
         """
         now = datetime.now()
         current_day = now.weekday()
-
+        print(current_day)
         temperature = 0
         for event in cls.days[current_day]:
             if (now > event["date"]):
@@ -101,7 +102,7 @@ class Schedule:
             The lowest temperature based on the schedule.
         """
         temperature = None
-        for day in cls.days:
+        for _, day in cls.days.items():
             for event in day:
                 if temperature is None or temperature > event["temperature"]:
                     temperature = event["temperature"]

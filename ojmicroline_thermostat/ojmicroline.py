@@ -74,8 +74,11 @@ class OJMicroline:
         self.__username = username
         self.__password = password
         self.__client_sw_version = client_sw_version
-        self.__http_session = session if session else ClientSession()
-        self.__close_http_session = True
+        if session:
+            self.__http_session = session
+        else:
+            self.__http_session = ClientSession()
+            self.__close_http_session = True
 
     async def _request(
         self,
@@ -150,7 +153,6 @@ class OJMicroline:
         Raises:
             OJMicrolineAuthException: An error occured while authenticating.
         """
-
         if self.__session_calls_left == 0 or self.__session_id is None:
             """Get a new session"""
             data = await self._request(
@@ -167,8 +169,7 @@ class OJMicroline:
 
             if data["ErrorCode"] == 1:
                 raise OJMicrolineAuthException(
-                    "Unable to create session, wrong username, password, \
-                        API key or customer ID provided"
+                    "Unable to create session, wrong username, password, API key or customer ID provided."  # noqa: E501
                 )
 
             """Reset the number of session calls"""
@@ -254,9 +255,9 @@ class OJMicroline:
     async def close(self) -> None:
         """Close open client session."""
         if self.__http_session and self.__close_http_session:
-            await self.__http_session.close()
             self.__close_http_session = False
             self.__session_id = None
+            await self.__http_session.close()
 
     async def __aenter__(self) -> OJMicroline:
         """

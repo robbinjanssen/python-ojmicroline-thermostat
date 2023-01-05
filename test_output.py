@@ -30,9 +30,9 @@ async def main() -> None:
     async with OJMicroline(  # noqa: S106
         host="ocd5.azurewebsites.net",
         customer_id=99,
-        api_key="",
-        username="",
-        password="",
+        api_key="f219aab4-9ac0-4343-8422-b72203e2fac9",
+        username="robbinjanssen",
+        password="dpaiU2PRV23XuqUm",
     ) as client:
         thermostats = await client.get_thermostats()
         for item in thermostats:
@@ -44,7 +44,7 @@ async def main() -> None:
             print("---")
 
         # Set first thermostat to another mode.
-        await client.set_regulation_mode(thermostats[0], REGULATION_BOOST)
+        # await client.set_regulation_mode(thermostats[0], REGULATION_BOOST)
         # await client.set_regulation_mode(thermostats[0], REGULATION_SCHEDULE)
         # await client.set_regulation_mode(thermostats[0], REGULATION_MANUAL, 2000)
         # await client.set_regulation_mode(thermostats[0], REGULATION_COMFORT, 2000)

@@ -58,6 +58,7 @@ safety = "^2.3.2"
 vulture = "^2.6"
 yamllint = "^1.28.0"
 types-cachetools = "^5.2.1"
+freezegun = "^1.2.2"
 
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/robbinjanssen/python-ojmicroline-thermostat/issues"
