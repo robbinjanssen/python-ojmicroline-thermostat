@@ -40,9 +40,12 @@ async def main() -> None:
     async with OJMicroline(  # noqa: S106
         host="ocd5.azurewebsites.net",
         customer_id=99,
-        api_key="app-api-key",
-        username="username",
-        password="password",
+        # api_key="app-api-key",
+        # username="username",
+        # password="password",
+        api_key="f219aab4-9ac0-4343-8422-b72203e2fac9",
+        username="robbinjanssen",
+        password="C4tschMrJeE6VJ6R",
     ) as client:
         thermostats = await client.get_thermostats()
         for resource in thermostats:
