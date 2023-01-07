@@ -10,6 +10,7 @@ from ..const import (
     REGULATION_VACATION,
     REGULATION_SCHEDULE,
     REGULATION_BOOST,
+    DATETIME_FORMAT,
 )
 from ..models import Thermostat
 
@@ -67,16 +68,16 @@ class UpdateGroupRequest:
                 "ExcludeVacationData": False,
                 "GroupId": self.resource.zone_id,
                 "GroupName": self.resource.zone_name,
-                "BoostEndTime": boost_end_time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "ComfortEndTime": comfort_end_time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "BoostEndTime": boost_end_time.strftime(DATETIME_FORMAT),
+                "ComfortEndTime": comfort_end_time.strftime(DATETIME_FORMAT),
                 "ComfortSetpoint": self.resource.temperatures[REGULATION_COMFORT],
                 "LastPrimaryModeIsAuto": (self.resource.regulation_mode == REGULATION_SCHEDULE),  # noqa: E501
                 "ManualModeSetpoint": self.resource.temperatures[REGULATION_MANUAL],
                 "RegulationMode": regulation_mode,
                 "Schedule": self.resource.schedule,
                 "VacationEnabled": self.resource.vacation_enabled,
-                "VacationBeginDay": self.resource.vacation_begin_time.strftime("%Y-%m-%dT%H:%M:%S"),  # noqa: E501
-                "VacationEndDay": self.resource.vacation_end_time.strftime("%Y-%m-%dT%H:%M:%S"),  # noqa: E501
+                "VacationBeginDay": self.resource.vacation_begin_time.strftime(DATETIME_FORMAT),  # noqa: E501
+                "VacationEndDay": self.resource.vacation_end_time.strftime(DATETIME_FORMAT),  # noqa: E501
                 "VacationTemperature": self.resource.temperatures[REGULATION_VACATION],  # noqa: E501
             }
         }

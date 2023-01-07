@@ -35,13 +35,13 @@ class Thermostat:
     name: str
     online: bool
     heating: bool
-    regulation_mode: int
-    sensor_mode: int
     adaptive_mode: bool
+    vacation_mode: bool
     open_window_detection: bool
     last_primary_mode_is_auto: bool
     daylight_saving_active: bool
-    vacation_enabled: bool
+    regulation_mode: int
+    sensor_mode: int
     temperature_floor: int
     temperature_room: int
     min_temperature: int
@@ -86,7 +86,7 @@ class Thermostat:
             open_window_detection=data["OpenWindow"],
             last_primary_mode_is_auto=data["LastPrimaryModeIsAuto"],
             daylight_saving_active=data["DaylightSavingActive"],
-            vacation_enabled=data["VacationEnabled"],
+            vacation_mode=data["VacationEnabled"],
             temperature_floor=data["FloorTemperature"],
             temperature_room=data["RoomTemperature"],
             min_temperature=data["MinSetpoint"],

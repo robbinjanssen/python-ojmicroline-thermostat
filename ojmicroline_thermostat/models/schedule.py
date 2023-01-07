@@ -74,7 +74,7 @@ class Schedule:
         """
         now = datetime.now()
         current_day = now.weekday()
-        print(current_day)
+
         temperature = 0
         for event in cls.days[current_day]:
             if (now > event["date"]):
