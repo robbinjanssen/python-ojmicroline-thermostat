@@ -75,7 +75,7 @@ class UpdateGroupRequest:
                 "ManualModeSetpoint": self.resource.temperatures[REGULATION_MANUAL],
                 "RegulationMode": regulation_mode,
                 "Schedule": self.resource.schedule,
-                "VacationEnabled": self.resource.vacation_enabled,
+                "VacationEnabled": self.resource.vacation_mode,
                 "VacationBeginDay": self.resource.vacation_begin_time.strftime(DATETIME_FORMAT),  # noqa: E501
                 "VacationEndDay": self.resource.vacation_end_time.strftime(DATETIME_FORMAT),  # noqa: E501
                 "VacationTemperature": self.resource.temperatures[REGULATION_VACATION],  # noqa: E501

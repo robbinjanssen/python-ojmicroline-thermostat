@@ -1,7 +1,7 @@
 # pylint: disable=W0621
 """Asynchronous Python client for OJ Electronics API."""
-
 import asyncio
+from time import sleep
 
 from ojmicroline_thermostat import OJMicroline
 from ojmicroline_thermostat.const import (
@@ -81,6 +81,29 @@ async def main() -> None:
             print(f"   Daylight Saving: {resource.daylight_saving_active}")
             print(f"   Last Primary Mode is auto: {resource.last_primary_mode_is_auto}")
             print("")
+
+            sleep(5)
+            print(f"Updating the preset mode for {resource.name}")
+            print(f"Current: {REGULATION_MODES[resource.regulation_mode]}")
+
+            print(f"- Setting to {REGULATION_MODES[REGULATION_MANUAL]} and temperature 2500")  # noqa: E501
+            await client.set_regulation_mode(resource, REGULATION_MANUAL, 2500)
+            print(f"Sleeping for 5 seconds..")
+            sleep(5)
+
+            print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")  # noqa: E501
+            await client.set_regulation_mode(resource, REGULATION_BOOST)
+            print(f"Sleeping for 5 seconds..")
+            sleep(5)
+
+            print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")  # noqa: E501
+            await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
+            print(f"Sleeping for 5 seconds..")
+
+            print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")  # noqa: E501
+            await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
+            print(f"Sleeping for 5 seconds..")
+            sleep(5)
 
 
 if __name__ == "__main__":
