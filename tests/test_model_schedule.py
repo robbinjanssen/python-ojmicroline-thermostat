@@ -16,7 +16,7 @@ async def test_schedule_from_json() -> None:
     """Make sure the data is accepted by the from_json method."""
     fixture = load_fixtures("schedule.json")
     data = json.loads(fixture)
-    schedule = Schedule.from_json(json.loads(data))
+    schedule = Schedule.from_json(data)
 
     assert schedule.days is not None
     for _, day in schedule.days.items():
