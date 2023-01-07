@@ -40,12 +40,9 @@ async def main() -> None:
     async with OJMicroline(  # noqa: S106
         host="ocd5.azurewebsites.net",
         customer_id=99,
-        # api_key="app-api-key",
-        # username="username",
-        # password="password",
-        api_key="f219aab4-9ac0-4343-8422-b72203e2fac9",
-        username="robbinjanssen",
-        password="C4tschMrJeE6VJ6R",
+        api_key="app-api-key",
+        username="username",
+        password="password",
     ) as client:
         thermostats = await client.get_thermostats()
         for resource in thermostats:
@@ -91,21 +88,21 @@ async def main() -> None:
 
             print(f"- Setting to {REGULATION_MODES[REGULATION_MANUAL]} and temperature 2500")  # noqa: E501
             await client.set_regulation_mode(resource, REGULATION_MANUAL, 2500)
-            print(f"Sleeping for 5 seconds..")
+            print("Sleeping for 5 seconds..")
             sleep(5)
 
             print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")  # noqa: E501
             await client.set_regulation_mode(resource, REGULATION_BOOST)
-            print(f"Sleeping for 5 seconds..")
+            print("Sleeping for 5 seconds..")
             sleep(5)
 
             print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")  # noqa: E501
             await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
-            print(f"Sleeping for 5 seconds..")
+            print("Sleeping for 5 seconds..")
 
             print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")  # noqa: E501
             await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
-            print(f"Sleeping for 5 seconds..")
+            print("Sleeping for 5 seconds..")
             sleep(5)
 
 
