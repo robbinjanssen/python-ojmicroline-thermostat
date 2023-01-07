@@ -1,21 +1,26 @@
+# pylint: disable=protected-access
+# mypy: disable-error-code=attr-defined
 """Test the models."""
-from . import load_fixtures
 import asyncio
-from ojmicroline_thermostat import (
-    Thermostat,
-    OJMicroline,
-    OJMicrolineException,
-    OJMicrolineAuthException,
-    OJMicrolineResultsException,
-    OJMicrolineTimeoutException,
-    OJMicrolineConnectionException,
-)
-from ojmicroline_thermostat.const import REGULATION_MANUAL
 import json
 from unittest.mock import patch
-from aresponses import Response, ResponsesMockServer
+
 import aiohttp
 import pytest
+from aresponses import Response, ResponsesMockServer  # type: ignore[import]
+
+from ojmicroline_thermostat import (
+    OJMicroline,
+    OJMicrolineAuthException,
+    OJMicrolineConnectionException,
+    OJMicrolineException,
+    OJMicrolineResultsException,
+    OJMicrolineTimeoutException,
+    Thermostat,
+)
+from ojmicroline_thermostat.const import REGULATION_MANUAL
+
+from . import load_fixtures
 
 
 @pytest.mark.asyncio
@@ -38,7 +43,7 @@ async def test_json_request(aresponses: ResponsesMockServer) -> None:
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
         response = await client._request("test")
         assert response is not None
@@ -50,6 +55,7 @@ async def test_json_request(aresponses: ResponsesMockServer) -> None:
 @pytest.mark.asyncio
 async def test_timeout(monkeypatch, aresponses: ResponsesMockServer) -> None:
     """Test request timeout."""
+
     async def response_handler(_: aiohttp.ClientResponse) -> Response:
         # Faking a timeout by sleeping
         await asyncio.sleep(0.2)
@@ -59,12 +65,7 @@ async def test_timeout(monkeypatch, aresponses: ResponsesMockServer) -> None:
             text=json.dumps({"ErrorCode": 0}),
         )
 
-    aresponses.add(
-        "owd5.test.py",
-        "/test",
-        "GET",
-        response_handler
-    )
+    aresponses.add("owd5.test.py", "/test", "GET", response_handler)
 
     async with aiohttp.ClientSession() as session:
         client = OJMicroline(
@@ -73,7 +74,7 @@ async def test_timeout(monkeypatch, aresponses: ResponsesMockServer) -> None:
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
         monkeypatch.setattr(client, "_OJMicroline__request_timeout", 0.1)
 
@@ -101,7 +102,7 @@ async def test_content_type(aresponses: ResponsesMockServer) -> None:
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
 
         with pytest.raises(OJMicrolineException):
@@ -118,13 +119,11 @@ async def test_client_error() -> None:
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
 
         with patch.object(
-            session,
-            "request",
-            side_effect=aiohttp.ClientError
+            session, "request", side_effect=aiohttp.ClientError
         ), pytest.raises(OJMicrolineConnectionException):
             assert await client._request("test")
 
@@ -147,7 +146,7 @@ async def test_internal_session(aresponses: ResponsesMockServer) -> None:
         api_key="ap1-k3y-v3ry-s3cret",
         customer_id=1337,
         username="py",
-        password="test"
+        password="test",
     ) as client:
         await client._request("/test")
 
@@ -162,11 +161,7 @@ async def test_login(aresponses: ResponsesMockServer) -> None:
         aresponses.Response(
             status=200,
             headers={"Content-Type": "application/json"},
-            text=json.dumps({
-                "SessionId": "f00br4",
-                "UserName": "py",
-                "ErrorCode": 0
-            }),
+            text=json.dumps({"SessionId": "f00br4", "UserName": "py", "ErrorCode": 0}),
         ),
     )
     async with aiohttp.ClientSession() as session:
@@ -176,11 +171,14 @@ async def test_login(aresponses: ResponsesMockServer) -> None:
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
 
         await client.login()
-        assert client._OJMicroline__session_calls_left == client._OJMicroline__session_calls  # noqa: E501
+        assert (
+            client._OJMicroline__session_calls_left
+            == client._OJMicroline__session_calls
+        )  # noqa: E501
         assert client._OJMicroline__session_id == "f00br4"
 
 
@@ -204,7 +202,7 @@ async def test_login_failed(aresponses: ResponsesMockServer) -> None:
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
 
         with pytest.raises(OJMicrolineAuthException):
@@ -234,7 +232,7 @@ async def test_get_thermostats(monkeypatch, aresponses: ResponsesMockServer) -> 
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
 
         monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)
@@ -248,8 +246,7 @@ async def test_get_thermostats(monkeypatch, aresponses: ResponsesMockServer) -> 
 
 @pytest.mark.asyncio
 async def test_get_thermostats_failed(
-    monkeypatch,
-    aresponses: ResponsesMockServer
+    monkeypatch, aresponses: ResponsesMockServer
 ) -> None:
     """Test get thermostats function to handle an error."""
     aresponses.add(
@@ -269,7 +266,7 @@ async def test_get_thermostats_failed(
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
 
         monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)
@@ -283,8 +280,7 @@ async def test_get_thermostats_failed(
 
 @pytest.mark.asyncio
 async def test_set_regulation_mode(
-    monkeypatch,
-    aresponses: ResponsesMockServer
+    monkeypatch, aresponses: ResponsesMockServer
 ) -> None:
     """Test updating the regulation mode."""
     aresponses.add(
@@ -307,7 +303,7 @@ async def test_set_regulation_mode(
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
 
         monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)
@@ -319,8 +315,7 @@ async def test_set_regulation_mode(
 
 @pytest.mark.asyncio
 async def test_set_regulation_mode_expect_login(
-    monkeypatch,
-    aresponses: ResponsesMockServer
+    monkeypatch, aresponses: ResponsesMockServer
 ) -> None:
     """Test update the regulation mode with login method fired."""
     aresponses.add(
@@ -334,6 +329,7 @@ async def test_set_regulation_mode_expect_login(
         ),
     )
     async with aiohttp.ClientSession() as session:
+
         def set_session_id() -> None:
             monkeypatch.setattr(client, "_OJMicroline__session_id", "f00b4r")
 
@@ -341,9 +337,7 @@ async def test_set_regulation_mode_expect_login(
         thermostat = Thermostat.from_json(json.loads(data))
 
         with patch.object(
-            OJMicroline,
-            "login",
-            side_effect=set_session_id
+            OJMicroline, "login", side_effect=set_session_id
         ) as mock_login:
             client = OJMicroline(
                 host="owd5.test.py",
@@ -351,7 +345,7 @@ async def test_set_regulation_mode_expect_login(
                 customer_id=1337,
                 username="py",
                 password="test",
-                session=session
+                session=session,
             )
             await client.set_regulation_mode(thermostat, REGULATION_MANUAL, None)
 
@@ -360,8 +354,7 @@ async def test_set_regulation_mode_expect_login(
 
 @pytest.mark.asyncio
 async def test_set_regulation_mode_failed(
-    monkeypatch,
-    aresponses: ResponsesMockServer
+    monkeypatch, aresponses: ResponsesMockServer
 ) -> None:
     """Test update the regulation mode when an error occurs."""
 
@@ -385,7 +378,7 @@ async def test_set_regulation_mode_failed(
             customer_id=1337,
             username="py",
             password="test",
-            session=session
+            session=session,
         )
 
         monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)

@@ -1,3 +1,4 @@
+# pylint: disable=too-many-arguments
 """Asynchronous Python client communicating with the OJ Microline API."""
 from __future__ import annotations
 
@@ -7,16 +8,16 @@ import socket
 from dataclasses import dataclass
 from typing import Any
 
-from aiohttp import ClientSession, ClientError, hdrs
 import async_timeout
+from aiohttp import ClientError, ClientSession, hdrs
 from yarl import URL
 
 from .exceptions import (
-    OJMicrolineTimeoutException,
     OJMicrolineAuthException,
     OJMicrolineConnectionException,
+    OJMicrolineException,
     OJMicrolineResultsException,
-    OJMicrolineException
+    OJMicrolineTimeoutException,
 )
 from .models import Thermostat
 from .requests import UpdateGroupRequest
@@ -54,7 +55,7 @@ class OJMicroline:
         username: str,
         password: str,
         client_sw_version: int = 1060,
-        session: ClientSession | None = None
+        session: ClientSession | None = None,
     ) -> None:
         """
         Create a new OJMicroline instance.
@@ -74,11 +75,7 @@ class OJMicroline:
         self.__username = username
         self.__password = password
         self.__client_sw_version = client_sw_version
-        if session:
-            self.__http_session = session
-        else:
-            self.__http_session = ClientSession()
-            self.__close_http_session = True
+        self.__http_session = session
 
     async def _request(
         self,
@@ -86,7 +83,7 @@ class OJMicroline:
         *,
         method: str = hdrs.METH_GET,
         params: dict[str, Any] | None = None,
-        body: dict | None = None,
+        body: dict[str, Any] | None = None,
     ) -> Any:
         """
         Handle a request to the OJ Microline API.
@@ -107,12 +104,13 @@ class OJMicroline:
             OJMicrolineException: Received an unexpected response from the API.
         """
         try:
-            """Reduce the number of calls left by 1."""
-            self.__session_calls_left -= 1
+            if self.__http_session is None:
+                self.__http_session = ClientSession()
+                self.__close_http_session = True
 
-            url = URL.build(scheme="https", host=self.__host, path="/").join(
-                URL(uri)
-            )
+            # Reduce the number of calls left by 1.
+            self.__session_calls_left -= 1
+            url = URL.build(scheme="https", host=self.__host, path="/").join(URL(uri))
 
             async with async_timeout.timeout(self.__request_timeout):
                 response = await self.__http_session.request(
@@ -151,20 +149,20 @@ class OJMicroline:
         Get a valid session to do requests with the OJ Microline API.
 
         Raises:
-            OJMicrolineAuthException: An error occured while authenticating.
+            OJMicrolineAuthException: An error occurred while authenticating.
         """
         if self.__session_calls_left == 0 or self.__session_id is None:
-            """Get a new session"""
+            # Get a new session.
             data = await self._request(
                 "api/UserProfile/SignIn",
                 method=hdrs.METH_POST,
                 body={
-                    'APIKEY': self.__api_key,
-                    'UserName': self.__username,
-                    'Password': self.__password,
-                    'ClientSWVersion': self.__client_sw_version,
-                    'CustomerId': self.__customer_id,
-                }
+                    "APIKEY": self.__api_key,
+                    "UserName": self.__username,
+                    "Password": self.__password,
+                    "ClientSWVersion": self.__client_sw_version,
+                    "CustomerId": self.__customer_id,
+                },
             )
 
             if data["ErrorCode"] == 1:
@@ -172,7 +170,7 @@ class OJMicroline:
                     "Unable to create session, wrong username, password, API key or customer ID provided."  # noqa: E501
                 )
 
-            """Reset the number of session calls"""
+            # Reset the number of session calls.
             self.__session_calls_left = self.__session_calls
             self.__session_id = data["SessionId"]
 
@@ -184,7 +182,7 @@ class OJMicroline:
             A list of Thermostats objects.
 
         Raises:
-            OJMicrolineResultsException: An error occured while getting thermostats.
+            OJMicrolineResultsException: An error occurred while getting thermostats.
         """
         await self.login()
 
@@ -192,10 +190,7 @@ class OJMicroline:
         data = await self._request(
             "api/Group/GroupContents",
             method=hdrs.METH_GET,
-            params={
-                "sessionid": self.__session_id,
-                "APIKEY": self.__api_key
-            },
+            params={"sessionid": self.__session_id, "APIKEY": self.__api_key},
         )
 
         if data["ErrorCode"] == 1:
@@ -212,10 +207,7 @@ class OJMicroline:
         return results
 
     async def set_regulation_mode(
-        self,
-        resource: Thermostat,
-        regulation_mode: int,
-        temperature: int | None = None
+        self, resource: Thermostat, regulation_mode: int, temperature: int | None = None
     ) -> bool:
         """
         Set the regulation mode.
@@ -234,7 +226,7 @@ class OJMicroline:
             True if it succeeded.
 
         Raises:
-            OJMicrolineException: An error occured while setting the regulation mode.
+            OJMicrolineException: An error occurred while setting the regulation mode.
         """
         if self.__session_id is None:
             await self.login()
@@ -244,7 +236,7 @@ class OJMicroline:
             "api/Group/UpdateGroup",
             method=hdrs.METH_POST,
             params={"sessionid": self.__session_id},
-            body=request.update_regulation_mode(regulation_mode, temperature)
+            body=request.update_regulation_mode(regulation_mode, temperature),
         )
 
         if data["ErrorCode"] == 1:

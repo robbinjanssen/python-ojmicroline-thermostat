@@ -2,18 +2,37 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 from datetime import datetime, timedelta
+from typing import Any
+
+
+@dataclass
+class ScheduleEvent:
+    """Object representing a single event in a schedule."""
+
+    date: datetime
+    temperature: int
+
+    def __init__(self, date: datetime, temperature: int) -> None:
+        """
+        Create a new ScheduleEvent instance.
+
+        Args:
+            date: The date of the event.
+            temperature: The temperature of the event.
+        """
+        self.date = date
+        self.temperature = temperature
 
 
 @dataclass
 class Schedule:
     """Object representing a schedule from a thermostat group."""
 
-    days: list[dict[Any]] | None = None
+    days: dict[int, list[ScheduleEvent]]
 
     @classmethod
-    def from_json(cls, data: dict[Any]) -> Schedule:
+    def from_json(cls, data: dict[str, Any]) -> Schedule:
         """
         Return a new Schedule instance based on the given JSON.
 
@@ -41,31 +60,34 @@ class Schedule:
 
             for event in item["Events"]:
                 if event["Active"] is True:
-                    hour, minute, second = event["Clock"].split(':')
+                    hour, minute, second = event["Clock"].split(":")
 
-                    events.append({
-                        "temperature": event["Temperature"],
-                        "date": datetime(
-                            now.year,
-                            now.month,
-                            now.day,
-                            int(hour),
-                            int(minute),
-                            int(second),
-                            now.microsecond,
-                            now.tzinfo,
-                        ) + timedelta(days=(day - current_day)),
-                    })
+                    events.append(
+                        ScheduleEvent(
+                            datetime(
+                                now.year,
+                                now.month,
+                                now.day,
+                                int(hour),
+                                int(minute),
+                                int(second),
+                                now.microsecond,
+                                now.tzinfo,
+                            )
+                            + timedelta(days=(day - current_day)),
+                            event["Temperature"],
+                        )
+                    )
+
             result[day] = events
-        return cls(
-            days=result
-        )
 
-    def get_active_temperature(cls) -> int:
+        return cls(days=result)
+
+    def get_active_temperature(self) -> int:
         """
         Get the current active temperature.
 
-        Returns the currenlty active temperature based on the
+        Returns the currently active temperature based on the
         schedule. It parses the schedule and compares the
         schedule times with the current date time.
 
@@ -76,9 +98,9 @@ class Schedule:
         current_day = now.weekday()
 
         temperature = 0
-        for event in cls.days[current_day]:
-            if (now > event["date"]):
-                temperature = event["temperature"]
+        for event in self.days[current_day]:
+            if now > event.date:
+                temperature = event.temperature
 
         # Check if a temperature is set, if not we need yesterday
         if temperature != 0:
@@ -89,9 +111,9 @@ class Schedule:
         else:
             prev_day = current_day - 1
 
-        return cls.days[prev_day][-1]["temperature"]
+        return self.days[prev_day][-1].temperature
 
-    def get_lowest_temperature(cls) -> int:
+    def get_lowest_temperature(self) -> int:
         """
         Get the lowest temperature.
 
@@ -102,9 +124,12 @@ class Schedule:
             The lowest temperature based on the schedule.
         """
         temperature = None
-        for _, day in cls.days.items():
+        for _, day in self.days.items():
             for event in day:
-                if temperature is None or temperature > event["temperature"]:
-                    temperature = event["temperature"]
+                if temperature is None or temperature > event.temperature:
+                    temperature = event.temperature
+
+        if temperature is None:
+            return 0
 
         return temperature

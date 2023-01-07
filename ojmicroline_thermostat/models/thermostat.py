@@ -1,25 +1,26 @@
+# pylint: disable=too-many-instance-attributes
 """Thermostat model for OJ Microline Thermostat."""
 from __future__ import annotations
-from .schedule import Schedule
-from datetime import datetime
-from time import strftime, gmtime
 
-from math import ceil
 from dataclasses import dataclass
+from datetime import datetime
+from math import ceil
+from time import gmtime, strftime
 from typing import Any
 
 from ..const import (
-    REGULATION_SCHEDULE,
-    REGULATION_ECO,
-    REGULATION_MANUAL,
-    REGULATION_FROST_PROTECTION,
     REGULATION_BOOST,
     REGULATION_COMFORT,
+    REGULATION_ECO,
+    REGULATION_FROST_PROTECTION,
+    REGULATION_MANUAL,
+    REGULATION_SCHEDULE,
     REGULATION_VACATION,
     SENSOR_FLOOR,
     SENSOR_ROOM,
     SENSOR_ROOM_FLOOR,
 )
+from .schedule import Schedule
 
 
 @dataclass
@@ -52,10 +53,10 @@ class Thermostat:
     vacation_begin_time: datetime
     vacation_end_time: datetime
     offset: int
-    schedule: dict[Any]
+    schedule: dict[str, Any]
 
     @classmethod
-    def from_json(cls, data: dict[Any]) -> Thermostat:
+    def from_json(cls, data: dict[str, Any]) -> Thermostat:
         """
         Return a new Thermostat instance based on the given JSON.
 
@@ -108,16 +109,16 @@ class Thermostat:
             },
         )
 
-    def get_target_temperature(cls) -> int:
+    def get_target_temperature(self) -> int:
         """
         Return the target temperature for the thermostat.
 
         Returns:
             The current temperature.
         """
-        return cls.temperatures[cls.regulation_mode]
+        return self.temperatures[self.regulation_mode]
 
-    def get_current_temperature(cls) -> int:
+    def get_current_temperature(self) -> int:
         """
         Return the current temperature for the thermostat.
 
@@ -127,12 +128,12 @@ class Thermostat:
         Returns:
             The current temperature.
         """
-        if cls.sensor_mode == SENSOR_ROOM:
-            return cls.temperature_room
-        elif cls.sensor_mode == SENSOR_FLOOR:
-            return cls.temperature_floor
-        elif cls.sensor_mode == SENSOR_ROOM_FLOOR:
-            return ceil((cls.temperature_floor + cls.temperature_room) / 2)
+        if self.sensor_mode == SENSOR_ROOM:
+            return self.temperature_room
+        if self.sensor_mode == SENSOR_FLOOR:
+            return self.temperature_floor
+        if self.sensor_mode == SENSOR_ROOM_FLOOR:
+            return ceil((self.temperature_floor + self.temperature_room) / 2)
 
         return 0
 

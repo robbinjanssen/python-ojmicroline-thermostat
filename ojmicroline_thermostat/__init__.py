@@ -1,9 +1,9 @@
 """Asynchronous Python client controlling an OJ Microline Thermostat."""
 
 from .exceptions import (
-    OJMicrolineException,
     OJMicrolineAuthException,
     OJMicrolineConnectionException,
+    OJMicrolineException,
     OJMicrolineResultsException,
     OJMicrolineTimeoutException,
 )

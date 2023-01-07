@@ -1,27 +1,25 @@
 """Test the models."""
-import pytest
 import json
 from datetime import datetime
+
+import pytest
 from freezegun import freeze_time
 
-from . import load_fixtures
-
 from ojmicroline_thermostat.const import (
-    REGULATION_SCHEDULE,
-    REGULATION_COMFORT,
-    REGULATION_MANUAL,
-    REGULATION_VACATION,
-    REGULATION_FROST_PROTECTION,
     REGULATION_BOOST,
+    REGULATION_COMFORT,
     REGULATION_ECO,
+    REGULATION_FROST_PROTECTION,
+    REGULATION_MANUAL,
+    REGULATION_SCHEDULE,
+    REGULATION_VACATION,
     SENSOR_FLOOR,
     SENSOR_ROOM,
     SENSOR_ROOM_FLOOR,
 )
+from ojmicroline_thermostat.models import Thermostat
 
-from ojmicroline_thermostat.models import (
-    Thermostat,
-)
+from . import load_fixtures
 
 
 @pytest.mark.asyncio
@@ -103,8 +101,8 @@ async def test_thermostat_from_json() -> None:
 @freeze_time("2023-01-01 11:30:35")
 async def test_thermostat_get_current_temperature() -> None:
     """Make sure the right temperature is returned for every sensor mode."""
-    data = load_fixtures("single_thermostat.json")
-    data = json.loads(data)
+    fixture = load_fixtures("single_thermostat.json")
+    data = json.loads(fixture)
     data["FloorTemperature"] = 4000
     data["RoomTemperature"] = 2000
 
@@ -129,8 +127,8 @@ async def test_thermostat_get_current_temperature() -> None:
 @freeze_time("2023-01-01 11:30:35")
 async def test_thermostat_get_target_temperature() -> None:
     """Test the right temperatuer is returned for all regulation modes."""
-    data = load_fixtures("single_thermostat.json")
-    data = json.loads(data)
+    fixture = load_fixtures("single_thermostat.json")
+    data = json.loads(fixture)
     data["Schedule"]["Days"][6]["Events"][1]["Temperature"] = 400
     data["ComfortSetpoint"] = 2
     data["ManualModeSetpoint"] = 3

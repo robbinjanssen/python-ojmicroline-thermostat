@@ -1,21 +1,21 @@
-# pylint: disable=W0621
+# pylint: disable=redefined-outer-name,too-many-statements)
 """Asynchronous Python client for OJ Electronics API."""
 import asyncio
 from time import sleep
 
 from ojmicroline_thermostat import OJMicroline
 from ojmicroline_thermostat.const import (
-    REGULATION_SCHEDULE,
-    REGULATION_ECO,
-    REGULATION_MANUAL,
-    REGULATION_FROST_PROTECTION,
+    DATETIME_FORMAT,
     REGULATION_BOOST,
     REGULATION_COMFORT,
+    REGULATION_ECO,
+    REGULATION_FROST_PROTECTION,
+    REGULATION_MANUAL,
+    REGULATION_SCHEDULE,
     REGULATION_VACATION,
     SENSOR_FLOOR,
     SENSOR_ROOM,
     SENSOR_ROOM_FLOOR,
-    DATETIME_FORMAT,
 )
 
 REGULATION_MODES = {
@@ -44,6 +44,7 @@ async def main() -> None:
         username="username",
         password="password",
     ) as client:
+        # fmt: off
         thermostats = await client.get_thermostats()
         for resource in thermostats:
             print("####################")
@@ -65,8 +66,8 @@ async def main() -> None:
             print(f"   Room: {resource.temperature_room}")
             print(f"   Min: {resource.min_temperature}")
             print(f"   Max: {resource.max_temperature}")
-            for mode in REGULATION_MODES:
-                print(f"   {REGULATION_MODES[mode]}: {resource.temperatures[mode]}")
+            for mode, name in REGULATION_MODES.items():
+                print(f"   {name}: {resource.temperatures[mode]}")
             print("- Dates:")
             print(f"   Comfort End: {resource.comfort_end_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
             print(f"   Boost End: {resource.boost_end_time.strftime(DATETIME_FORMAT)}")
@@ -104,6 +105,7 @@ async def main() -> None:
             await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
             print("Sleeping for 5 seconds..")
             sleep(5)
+        # fmt: on
 
 
 if __name__ == "__main__":

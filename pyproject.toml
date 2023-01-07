@@ -89,6 +89,12 @@ multi_line_output = 3
 platform = "linux"
 python_version = 3.9
 
+[[tool.mypy.overrides]]
+module = [
+  "tests/*"
+]
+ignore_errors = true
+
 # flake8-mypy expects the two following for sensible formatting
 show_column_numbers = true
 

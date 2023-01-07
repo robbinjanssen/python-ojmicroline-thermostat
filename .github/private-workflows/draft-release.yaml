@@ -3,7 +3,8 @@ name: Draft Release
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   update-release-draft:
