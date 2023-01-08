@@ -73,7 +73,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: ⬇Download coverage data
+      - name: Download coverage data
         uses: actions/download-artifact@v3
 
       - name: Set up Python 3.9
