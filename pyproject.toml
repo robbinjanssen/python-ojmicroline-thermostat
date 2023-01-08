@@ -2,8 +2,8 @@
 name = "ojmicroline-thermostat"
 version = "1.0.0"
 description = "Asynchronous Python client controlling an OJ Microline Thermostat."
-authors = ["Robbin Janssen <robbinjanssen@gmail>"]
-maintainers = ["Robbin Janssen <robbinjanssen@gmail>"]
+authors = ["Robbin Janssen <robbinjanssen@gmail.com>"]
+maintainers = ["Robbin Janssen <robbinjanssen@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/robbinjanssen/python-ojmicroline-thermostat"
