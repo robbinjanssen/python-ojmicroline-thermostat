@@ -31,45 +31,68 @@ pip install ojmicroline-thermostat
 
 ## Datasets
 
-<details>
-    <summary>Click here to get more details</summary>
-
 ### Thermostat
 
 This set represents the current state of your thermostat.
 
-**NOTE**: Not all parking garages have data for long-term parking.
-
 | Variable | Type | Description |
 | :------- | :--- | :---------- |
-| `thermostat_id` | int | ... |
-| `model` | string | ... |
-| `serial_number` | string | ... |
-| `software_version` | string | ... |
-| `zone_name` | string | ... |
-| `zone_id` | integer | ... |
-| `name` | string | ... |
-| `online` | boolean | ... |
-| `heating` | boolean | ... |
-| `adaptive_mode` | boolean | ... |
-| `vacation_mode` | boolean | ... |
-| `open_window_detection` | boolean | ... |
-| `last_primary_mode_is_auto` | boolean | ... |
-| `daylight_saving_active` | boolean | ... |
-| `regulation_mode` | integer | ... |
-| `sensor_mode` | integer | ... |
-| `temperature_floor` | integer | ... |
-| `temperature_room` | integer | ... |
-| `min_temperature` | integer | ... |
-| `max_temperature` | integer | ... |
-| `temperatures` | object | ... |
-| `boost_end_time` | datetime | ... |
-| `comfort_end_time` | datetime | ... |
-| `vacation_begin_time` | datetime | ... |
-| `vacation_end_time` | datetime | ... |
-| `offset` | integer | ... |
-| `schedule` | Schedule | ... |
-</details>
+| `thermostat_id` | int | The unique identifier for this thermostat. |
+| `model` | string | The model name for this thermostat. |
+| `serial_number` | string | The serial number for this thermostat. |
+| `software_version` | string | The currently installed software version. |
+| `zone_name` | string | The name of the zone this thermostat belongs to. |
+| `zone_id` | integer | The ID of the zone this thermostat belongs to. |
+| `name` | string | The name of the thermostat. |
+| `online` | boolean | Indicates if the thermostat is connected to the network. |
+| `heating` | boolean | Indicates if the thermostat is currently heating/is on. |
+| `adaptive_mode` | boolean | If on then then the thermostat automatically changes heating start times to ensure that the required temperature has been reached at the beginning of any specific event. |
+| `vacation_mode` | boolean | If on then the thermostat regulates the heating of your home to a minimum while you are away on holiday, thus saving energy and money. |
+| `open_window_detection` | boolean | If on then the thermostat shuts off the heating for 30 minutes if an open window is detected. |
+| `last_primary_mode_is_auto` | boolean | Unknown |
+| `daylight_saving_active` | boolean | If on, the "Daylight Saving Time" function of the thermostat will automatically adjust the clock to the daylight saving time for the "Region" chosen. |
+| `regulation_mode` | integer | The currently set regulation mode of the thermostat, see below. |
+| `sensor_mode` | integer | The currently set sensor mode of the thermostat, see below. |
+| `temperature_floor` | integer | The temperature measured by the floor. sensor |
+| `temperature_room` | integer | The temperature measured by the room sensor. |
+| `min_temperature` | integer | The minimum set temperature for the thermostat. |
+| `max_temperature` | integer | The maximum set temperature for the thermostat. |
+| `temperatures` | object | The currently set temperatures for each regulation mode, see below. |
+| `boost_end_time` | datetime | If the regulation mode is set to boost mode, it will end at this time. |
+| `comfort_end_time` | datetime | If the regulation mode is set to comfort mode, it will end at this time. |
+| `vacation_begin_time` | datetime | Vacation mode will be set to on when this date time passes. |
+| `vacation_end_time` | datetime | Vacation mode will be set to off when this date time passes. |
+| `offset` | integer | The offset (timezone) set by the thermostat. |
+| `schedule` | Schedule | The schedule the thermostat currently uses. |
+
+#### Regulation modes
+
+| Integer | Constant | Description |
+| :------- | :--- | :---------- |
+| `1` | `REGULATION_SCHEDULE` | The thermostat follows the configured schedule. |
+| `2` | `REGULATION_COMFORT` | The thermostat is in comfort mode for the next 4 hours. |
+| `3` | `REGULATION_MANUAL` | The thermostat is in manual mode, will not resume schedule unless changed. |
+| `4` | `REGULATION_VACATION` | The thermostat is in vacation mode, it started at `vacation_begin_time` and ends at `vacation_end_time`. |
+| `6` | `REGULATION_FROST_PROTECTION` | The thermostat is set to frost protection, preventing the floor from freezing. |
+| `8` | `REGULATION_BOOST` | The thermostat is in boost mode for 1 hour, using the `max_temperature` as target temperature. |
+| `9` | `REGULATION_ECO` | The thermostat is in eco mode, using the lowest temperature of the `schedule`. |
+
+#### Sensor modes
+
+| Integer | Constant | Description |
+| :------- | :--- | :---------- |
+| `1` | `SENSOR_ROOM_FLOOR` | The thermostat takes the average of the room and floor temperature |
+| `3` | `SENSOR_FLOOR` | The thermostat is using the floor sensor for target temperature. |
+| `4` | `SENSOR_ROOM` | The thermostat is using the room sensor for target temperature. |
+
+## Methods
+
+### OJMicroline
+| Method | Params | Description |
+| :------- | :--- | :---------- |
+| `login` | `None` | Create a new session at the OJ Microline API. |
+| `get_thermostats` | `None` | Get all thermostats from the OJ Microline API. |
+| `set_regulation_mode` | `resource: Thermostat`, `regulation_mode: int`, `temperature: int \| None = None` | Set the regulation mode based on the input.<br> - `resource`: An instance of a Thermostat model returned by `get_thermostats()`<br> - `regulation_mode`: An integer representing the regulation mode, see "Regulation modes"<br> - `temperature`: An integer representing the temperature, eg: 2500. Only useful when setting the regulation mode to manual or comfort. |
 
 ## Usage
 
