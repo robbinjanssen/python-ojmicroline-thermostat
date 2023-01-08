@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu]
-        python: ["3.10", "3.11"]
+        python: ["3.9", "3.10", "3.11"]
 
     steps:
       - name: Checkout repository
@@ -76,11 +76,11 @@ jobs:
       - name: ⬇Download coverage data
         uses: actions/download-artifact@v3
       
-      - name: Set up Python 3.10
+      - name: Set up Python 3.9
         id: python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.9'
 
       - name: Set pip cache dir
         id: pip-cache
