@@ -44,7 +44,7 @@ jobs:
           pip install -r .github/workflows/requirements.txt
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-      
+
       - name: Restore cached Python venv
         id: cached-poetry-dependencies
         uses: actions/cache@v3
@@ -53,13 +53,13 @@ jobs:
           key: >-
             venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
             venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-
-      
+
       - name: Install dependencies
         run: poetry install --no-interaction
-      
+
       - name: Run pytest
         run: poetry run pytest --cov odp_amsterdam tests
-      
+
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v3
         with:
@@ -75,7 +75,7 @@ jobs:
 
       - name: ⬇Download coverage data
         uses: actions/download-artifact@v3
-      
+
       - name: Set up Python 3.9
         id: python
         uses: actions/setup-python@v4
@@ -109,7 +109,7 @@ jobs:
           key: >-
             venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
             venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-
-      
+
       - name: Install dependencies
         run: poetry install --no-interaction
 
