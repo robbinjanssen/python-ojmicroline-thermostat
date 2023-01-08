@@ -77,9 +77,8 @@ This set represents the current state of your thermostat.
 import asyncio
 from time import sleep
 
-from ojmicroline_thermostat import OJMicroline
+from ojmicroline_thermostat import OJMicroline, Thermostat
 from ojmicroline_thermostat.const import (
-    DATETIME_FORMAT,
     REGULATION_BOOST,
     REGULATION_COMFORT,
     REGULATION_ECO,
@@ -147,6 +146,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 ```
 
 ## Contributing
