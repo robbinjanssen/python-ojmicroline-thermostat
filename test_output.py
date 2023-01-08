@@ -1,5 +1,5 @@
 # pylint: disable=redefined-outer-name,too-many-statements)
-"""Asynchronous Python client for OJ Electronics API."""
+"""Asynchronous Python client for OJ Microline Thermostat."""
 import asyncio
 from time import sleep
 
@@ -36,7 +36,7 @@ SENSOR_MODES = {
 
 
 async def main() -> None:
-    """Show example on using the OJ Electronics API client."""
+    """Show example on using the OJ Microline client."""
     async with OJMicroline(  # noqa: S106
         host="ocd5.azurewebsites.net",
         customer_id=99,
