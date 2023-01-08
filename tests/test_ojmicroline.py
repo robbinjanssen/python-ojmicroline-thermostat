@@ -1,5 +1,5 @@
 # pylint: disable=protected-access
-# mypy: disable-error-code=attr-defined  # noqa: E800
+# mypy: disable-error-code=attr-defined
 """Test the models."""
 import asyncio
 import json
