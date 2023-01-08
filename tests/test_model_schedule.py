@@ -1,10 +1,10 @@
 """Test the models."""
 import json
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
 from freezegun import freeze_time
-from typing import Any
 
 from ojmicroline_thermostat.models import Schedule
 
