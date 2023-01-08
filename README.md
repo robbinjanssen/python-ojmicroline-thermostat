@@ -42,17 +42,33 @@ This set represents the current state of your thermostat.
 
 | Variable | Type | Description |
 | :------- | :--- | :---------- |
-| `garage_id` | string | The id of the garage |
-| `garage_name` | string | The name of the garage |
-| `state` | string | The state of the garage (`ok` or `problem`) |
-| `free_space_short` | integer | The number of free spaces for day visitors |
-| `free_space_long` | integer (or None) | The number of free spaces for season ticket holders |
-| `short_capacity` | integer | The total capacity of the garage for day visitors |
-| `long_capacity` | integer (or None) | The total capacity of the garage for season ticket holders |
-| `availability_pct` | float | The percentage of free parking spaces |
-| `longitude` | float | The longitude of the garage |
-| `latitude` | float | The latitude of the garage |
-
+| `thermostat_id` | int | ... |
+| `model` | string | ... |
+| `serial_number` | string | ... |
+| `software_version` | string | ... |
+| `zone_name` | string | ... |
+| `zone_id` | integer | ... |
+| `name` | string | ... |
+| `online` | boolean | ... |
+| `heating` | boolean | ... |
+| `adaptive_mode` | boolean | ... |
+| `vacation_mode` | boolean | ... |
+| `open_window_detection` | boolean | ... |
+| `last_primary_mode_is_auto` | boolean | ... |
+| `daylight_saving_active` | boolean | ... |
+| `regulation_mode` | integer | ... |
+| `sensor_mode` | integer | ... |
+| `temperature_floor` | integer | ... |
+| `temperature_room` | integer | ... |
+| `min_temperature` | integer | ... |
+| `max_temperature` | integer | ... |
+| `temperatures` | object | ... |
+| `boost_end_time` | datetime | ... |
+| `comfort_end_time` | datetime | ... |
+| `vacation_begin_time` | datetime | ... |
+| `vacation_end_time` | datetime | ... |
+| `offset` | integer | ... |
+| `schedule` | Schedule | ... |
 </details>
 
 ## Usage
@@ -62,6 +78,36 @@ import asyncio
 from time import sleep
 
 from ojmicroline_thermostat import OJMicroline
+from ojmicroline_thermostat.const import (
+    DATETIME_FORMAT,
+    REGULATION_BOOST,
+    REGULATION_COMFORT,
+    REGULATION_ECO,
+    REGULATION_FROST_PROTECTION,
+    REGULATION_MANUAL,
+    REGULATION_SCHEDULE,
+    REGULATION_VACATION,
+    SENSOR_FLOOR,
+    SENSOR_ROOM,
+    SENSOR_ROOM_FLOOR,
+)
+
+REGULATION_MODES = {
+    REGULATION_SCHEDULE: "Schedule",
+    REGULATION_ECO: "Eco",
+    REGULATION_MANUAL: "None (Manual)",
+    REGULATION_FROST_PROTECTION: "Frost Protection",
+    REGULATION_BOOST: "Boost",
+    REGULATION_COMFORT: "Comfort",
+    REGULATION_VACATION: "Vacation",
+}
+
+SENSOR_MODES = {
+    SENSOR_FLOOR: "Floor",
+    SENSOR_ROOM: "Room",
+    SENSOR_ROOM_FLOOR: "Room/Floor",
+}
+
 
 async def main():
     """Show example on using the OJMicroline client."""
@@ -91,11 +137,11 @@ async def main():
             print(f"   Room: {resource.temperature_room}")
             print("")
 
-            print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")
+            print(f"- Setting to boost mode")
             await client.set_regulation_mode(resource, REGULATION_BOOST)
             print("Sleeping for 5 seconds..")
             sleep(5)
-            print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")  # noqa: E501
+            print(f"- Setting to schedule")  # noqa: E501
             await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
 
 
