@@ -1,4 +1,4 @@
-# pylint: disable=redefined-outer-name,too-many-statements)
+# pylint: disable=redefined-outer-name,too-many-statements
 """Asynchronous Python client for OJ Microline Thermostat."""
 import asyncio
 from time import sleep
