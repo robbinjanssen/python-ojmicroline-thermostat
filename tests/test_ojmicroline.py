@@ -18,7 +18,7 @@ from ojmicroline_thermostat import (
     OJMicrolineTimeoutException,
     Thermostat,
 )
-from ojmicroline_thermostat.const import REGULATION_MANUAL
+from ojmicroline_thermostat.const import REGULATION_COMFORT, REGULATION_MANUAL
 
 from . import load_fixtures
 
@@ -385,6 +385,6 @@ async def test_set_regulation_mode_failed(
         monkeypatch.setattr(client, "_OJMicroline__session_id", "f00b4r")
 
         with pytest.raises(OJMicrolineException):
-            await client.set_regulation_mode(thermostat, REGULATION_MANUAL, 2500)
+            await client.set_regulation_mode(thermostat, REGULATION_COMFORT, 2500, 360)
 
         assert client._OJMicroline__session_calls_left == 299

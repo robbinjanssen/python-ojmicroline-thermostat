@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..const import (
+    COMFORT_DURATION,
     DATETIME_FORMAT,
     REGULATION_BOOST,
     REGULATION_COMFORT,
@@ -36,7 +37,10 @@ class UpdateGroupRequest:
         self.api_key = api_key
 
     def update_regulation_mode(
-        self, regulation_mode: int, temperature: int | None = None
+        self,
+        regulation_mode: int,
+        temperature: int | None = None,
+        duration: int = COMFORT_DURATION,
     ) -> dict[str, Any]:
         """
         Return a request body to update the regulation mode for a group.
@@ -44,6 +48,8 @@ class UpdateGroupRequest:
         Args:
             regulation_mode: The mode to set the regulation mode in.
             temperature: The temperature (for comfort and manual mode) or None.
+            duration: The duration in minutes to set the temperature
+                      for (comfort mode only), defaults to 4 hours.
 
         Returns:
             A JSON object containing the update.
@@ -52,7 +58,7 @@ class UpdateGroupRequest:
             self.resource.temperatures[regulation_mode] = temperature
 
         if regulation_mode == REGULATION_COMFORT:
-            comfort_end_time = datetime.today() + timedelta(hours=4)
+            comfort_end_time = datetime.today() + timedelta(minutes=duration)
         else:
             comfort_end_time = self.resource.comfort_end_time
 
@@ -72,19 +78,17 @@ class UpdateGroupRequest:
                 "ComfortSetpoint": self.resource.temperatures[REGULATION_COMFORT],
                 "LastPrimaryModeIsAuto": (
                     self.resource.regulation_mode == REGULATION_SCHEDULE
-                ),  # noqa: E501
+                ),
                 "ManualModeSetpoint": self.resource.temperatures[REGULATION_MANUAL],
                 "RegulationMode": regulation_mode,
                 "Schedule": self.resource.schedule,
                 "VacationEnabled": self.resource.vacation_mode,
                 "VacationBeginDay": self.resource.vacation_begin_time.strftime(
                     DATETIME_FORMAT
-                ),  # noqa: E501
+                ),
                 "VacationEndDay": self.resource.vacation_end_time.strftime(
                     DATETIME_FORMAT
-                ),  # noqa: E501
-                "VacationTemperature": self.resource.temperatures[
-                    REGULATION_VACATION
-                ],  # noqa: E501
+                ),
+                "VacationTemperature": self.resource.temperatures[REGULATION_VACATION],
             },
         }
