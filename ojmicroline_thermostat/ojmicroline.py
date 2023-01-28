@@ -12,6 +12,7 @@ import async_timeout
 from aiohttp import ClientError, ClientSession, hdrs
 from yarl import URL
 
+from .const import COMFORT_DURATION
 from .exceptions import (
     OJMicrolineAuthException,
     OJMicrolineConnectionException,
@@ -207,7 +208,11 @@ class OJMicroline:
         return results
 
     async def set_regulation_mode(
-        self, resource: Thermostat, regulation_mode: int, temperature: int | None = None
+        self,
+        resource: Thermostat,
+        regulation_mode: int,
+        temperature: int | None = None,
+        duration: int = COMFORT_DURATION,
     ) -> bool:
         """
         Set the regulation mode.
@@ -220,6 +225,8 @@ class OJMicroline:
             resource: The Thermostat model or the serial number of
                       the thermostat to update.
             regulation_mode: The mode to set the thermostat to.
+            duration: The duration in minutes to set the temperature
+                      for (comfort mode only), defaults to 4 hours.
             temperature: The temperature to set or None.
 
         Returns:
@@ -236,7 +243,11 @@ class OJMicroline:
             "api/Group/UpdateGroup",
             method=hdrs.METH_POST,
             params={"sessionid": self.__session_id},
-            body=request.update_regulation_mode(regulation_mode, temperature),
+            body=request.update_regulation_mode(
+                regulation_mode=regulation_mode,
+                duration=duration,
+                temperature=temperature,
+            ),
         )
 
         if data["ErrorCode"] == 1:

@@ -6,6 +6,7 @@ import pytest
 from freezegun import freeze_time
 
 from ojmicroline_thermostat.const import (
+    COMFORT_DURATION,
     REGULATION_BOOST,
     REGULATION_COMFORT,
     REGULATION_MANUAL,
@@ -50,11 +51,11 @@ async def test_update_regulation_mode_comfort() -> None:
     assert thermostat.temperatures[REGULATION_COMFORT] == 2000
 
     request = UpdateGroupRequest(resource=thermostat, api_key="v3ry-s3cr3t")
-    result = request.update_regulation_mode(REGULATION_COMFORT)
+    result = request.update_regulation_mode(regulation_mode=REGULATION_COMFORT)
 
-    # Assert comfort end time is the current date + 240 minutes.
+    # Assert comfort end time is the current date + COMFORT_DURATION minutes.
     assert result["SetGroup"]["ComfortEndTime"] == (
-        datetime.now() + timedelta(minutes=240)
+        datetime.now() + timedelta(minutes=COMFORT_DURATION)
     ).strftime(dateformat)
 
     # Assert rest is the same.
@@ -88,7 +89,9 @@ async def test_update_regulation_mode_comfort_with_temp_and_duration() -> None:
     assert thermostat.temperatures[REGULATION_COMFORT] == 2000
 
     request = UpdateGroupRequest(resource=thermostat, api_key="v3ry-s3cr3t")
-    result = request.update_regulation_mode(REGULATION_COMFORT, 2350, 360)
+    result = request.update_regulation_mode(
+        regulation_mode=REGULATION_COMFORT, temperature=2350, duration=360
+    )
 
     # Assert comfort end time is the current date + 360 minutes.
     assert result["SetGroup"]["ComfortEndTime"] == (

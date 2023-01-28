@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..const import (
+    COMFORT_DURATION,
     DATETIME_FORMAT,
     REGULATION_BOOST,
     REGULATION_COMFORT,
@@ -36,7 +37,10 @@ class UpdateGroupRequest:
         self.api_key = api_key
 
     def update_regulation_mode(
-        self, regulation_mode: int, temperature: int | None = None, duration: int = 240
+        self,
+        regulation_mode: int,
+        temperature: int | None = None,
+        duration: int = COMFORT_DURATION,
     ) -> dict[str, Any]:
         """
         Return a request body to update the regulation mode for a group.
