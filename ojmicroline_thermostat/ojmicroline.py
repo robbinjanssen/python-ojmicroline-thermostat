@@ -225,9 +225,9 @@ class OJMicroline:
             resource: The Thermostat model or the serial number of
                       the thermostat to update.
             regulation_mode: The mode to set the thermostat to.
+            temperature: The temperature to set or None.
             duration: The duration in minutes to set the temperature
                       for (comfort mode only), defaults to 4 hours.
-            temperature: The temperature to set or None.
 
         Returns:
             True if it succeeded.
@@ -245,8 +245,8 @@ class OJMicroline:
             params={"sessionid": self.__session_id},
             body=request.update_regulation_mode(
                 regulation_mode=regulation_mode,
-                duration=duration,
                 temperature=temperature,
+                duration=duration,
             ),
         )
 
