@@ -632,13 +632,13 @@ flake8 = ">5"
 
 [[package]]
 name = "flake8-markdown"
-version = "0.4.0"
+version = "0.5.0"
 description = "Lints Python code blocks in Markdown files using flake8"
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8"
 files = [
-    {file = "flake8-markdown-0.4.0.tar.gz", hash = "sha256:c1d1f2c5055df2d6af22597aca401e6693a3d1389d06d2105272cb80478e686c"},
-    {file = "flake8_markdown-0.4.0-py3-none-any.whl", hash = "sha256:d03dfd75605e7346416de0adaedfbfa0f50833a1f8a3aec634065a577f90a950"},
+    {file = "flake8_markdown-0.5.0-py3-none-any.whl", hash = "sha256:1930a77e883e130166da20d11ce34bddeeb2779c49783b2673498a2b21c0749c"},
+    {file = "flake8_markdown-0.5.0.tar.gz", hash = "sha256:ec2aa584edb16a7ad5a5e9ea59c287aebddd9cb92ebcb5b10efa1402e52caf1e"},
 ]
 
 [package.dependencies]
@@ -1980,4 +1980,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "6b42226a977c7dab0418bd9e792cc1d53826324c104b8d3d0544fd4a2eb26f2b"
+content-hash = "4800b2f5d2fe998e34f6c2d6cf3959a256bcba6a42b29e912c964f37d2221c9a"
