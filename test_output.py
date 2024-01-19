@@ -3,7 +3,7 @@
 import asyncio
 from time import sleep
 
-from ojmicroline_thermostat import OJMicroline
+from ojmicroline_thermostat import WD5API
 from ojmicroline_thermostat.const import (
     DATETIME_FORMAT,
     REGULATION_BOOST,
@@ -37,7 +37,7 @@ SENSOR_MODES = {
 
 async def main() -> None:
     """Show example on using the OJ Microline client."""
-    async with OJMicroline(  # noqa: S106
+    async with WD5API(  # noqa: S106
         host="ocd5.azurewebsites.net",
         customer_id=99,
         api_key="<app-api-key>",

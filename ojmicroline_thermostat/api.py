@@ -1,5 +1,5 @@
 # pylint: disable=too-many-arguments
-"""Asynchronous Python client communicating with the OJ Microline API."""
+"""Asynchronous client for controlling OJ Microline thermostats."""
 from __future__ import annotations
 
 import asyncio
@@ -25,8 +25,8 @@ from .requests import UpdateGroupRequest
 
 
 @dataclass
-class OJMicroline:
-    """Main class for handling data from OJ Microline API."""
+class WD5API:
+    """Controls OJ Microline WD5-series thermostats (OWD5, MWD5, etc.)."""
 
     __host: str
     __api_key: str
@@ -262,7 +262,7 @@ class OJMicroline:
             self.__session_id = None
             await self.__http_session.close()
 
-    async def __aenter__(self) -> OJMicroline:
+    async def __aenter__(self) -> WD5API:
         """
         Async enter.
 
