@@ -9,6 +9,8 @@ from .exceptions import (
 )
 from .models import Thermostat
 from .ojmicroline import OJMicroline
+from .wd5 import WD5API
+from .wg4 import WG4API
 
 __all__ = [
     "Thermostat",
@@ -18,4 +20,6 @@ __all__ = [
     "OJMicrolineConnectionException",
     "OJMicrolineResultsException",
     "OJMicrolineTimeoutException",
+    "WD5API",
+    "WG4API",
 ]

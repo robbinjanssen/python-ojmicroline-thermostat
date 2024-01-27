@@ -1,4 +1,5 @@
-"""Test the models."""
+"""Test the Thermostat model for WD5-series APIs."""
+
 import json
 from datetime import datetime
 
@@ -24,43 +25,17 @@ from . import load_fixtures
 
 @pytest.mark.asyncio
 @freeze_time("2023-01-01 11:30:35")
-async def test_thermostat_from_json() -> None:
-    """Make sure the data is accepted by the from_json method."""
-    data = load_fixtures("single_thermostat.json")
-    thermostat = Thermostat.from_json(json.loads(data))
+async def test_thermostat_from_json_wd5() -> None:
+    """Make sure the data is accepted by the from_wd5_json method."""
+    data = load_fixtures("wd5_thermostat.json")
+    thermostat = Thermostat.from_wd5_json(json.loads(data))
 
-    fields = [
-        "thermostat_id",
-        "model",
-        "serial_number",
-        "software_version",
-        "zone_name",
-        "zone_id",
-        "name",
-        "online",
-        "heating",
-        "regulation_mode",
-        "sensor_mode",
-        "adaptive_mode",
-        "open_window_detection",
-        "last_primary_mode_is_auto",
-        "daylight_saving_active",
-        "vacation_mode",
-        "temperature_floor",
-        "temperature_room",
-        "min_temperature",
-        "max_temperature",
-        "temperatures",
-        "boost_end_time",
-        "comfort_end_time",
-        "vacation_begin_time",
-        "vacation_end_time",
-        "offset",
-        "schedule",
-    ]
-
-    for field in fields:
-        assert getattr(thermostat, field) is not None
+    for field in REQUIRED_FIELDS + WD5_ONLY_FIELDS:
+        assert (
+            getattr(thermostat, field) is not None
+        ), f"Expected {field} to be non-null"
+    for field in WG4_ONLY_FIELDS:
+        assert getattr(thermostat, field) is None, f"Expected {field} to be null"
 
     assert thermostat.thermostat_id == 117006
     assert thermostat.model == "OWD5"
@@ -72,6 +47,15 @@ async def test_thermostat_from_json() -> None:
     assert thermostat.online is True
     assert thermostat.heating is False
     assert thermostat.regulation_mode == 1
+    assert thermostat.supported_regulation_modes == [
+        REGULATION_SCHEDULE,
+        REGULATION_COMFORT,
+        REGULATION_MANUAL,
+        REGULATION_VACATION,
+        REGULATION_FROST_PROTECTION,
+        REGULATION_BOOST,
+        REGULATION_ECO,
+    ]
     assert thermostat.sensor_mode == 3
     assert thermostat.adaptive_mode is True
     assert thermostat.open_window_detection is False
@@ -86,48 +70,45 @@ async def test_thermostat_from_json() -> None:
     assert isinstance(thermostat.comfort_end_time, datetime)
     assert isinstance(thermostat.vacation_begin_time, datetime)
     assert isinstance(thermostat.vacation_end_time, datetime)
-    assert thermostat.offset == 3600
     assert isinstance(thermostat.schedule, object)
-    assert thermostat.temperatures[1] == 1800
-    assert thermostat.temperatures[2] == 2000
-    assert thermostat.temperatures[3] == 2350
-    assert thermostat.temperatures[4] == 500
-    assert thermostat.temperatures[6] == 500
-    assert thermostat.temperatures[8] == 4000
-    assert thermostat.temperatures[9] == 1500
+    assert thermostat.comfort_temperature == 2000
+    assert thermostat.manual_temperature == 2350
+    assert thermostat.vacation_temperature == 500
+    assert thermostat.frost_protection_temperature == 500
+    assert thermostat.boost_temperature == 4000
 
 
 @pytest.mark.asyncio
 @freeze_time("2023-01-01 11:30:35")
 async def test_thermostat_get_current_temperature() -> None:
     """Make sure the right temperature is returned for every sensor mode."""
-    fixture = load_fixtures("single_thermostat.json")
+    fixture = load_fixtures("wd5_thermostat.json")
     data = json.loads(fixture)
     data["FloorTemperature"] = 4000
     data["RoomTemperature"] = 2000
 
     data["SensorAppl"] = SENSOR_FLOOR
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_current_temperature() == 4000
 
     data["SensorAppl"] = SENSOR_ROOM
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_current_temperature() == 2000
 
     data["SensorAppl"] = SENSOR_ROOM_FLOOR
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_current_temperature() == 3000
 
     data["SensorAppl"] = 999
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_current_temperature() == 0
 
 
 @pytest.mark.asyncio
 @freeze_time("2023-01-01 11:30:35")
 async def test_thermostat_get_target_temperature() -> None:
-    """Test the right temperatuer is returned for all regulation modes."""
-    fixture = load_fixtures("single_thermostat.json")
+    """Test the right temperature is returned for all regulation modes."""
+    fixture = load_fixtures("wd5_thermostat.json")
     data = json.loads(fixture)
     data["Schedule"]["Days"][6]["Events"][1]["Temperature"] = 400
     data["ComfortSetpoint"] = 2
@@ -138,29 +119,117 @@ async def test_thermostat_get_target_temperature() -> None:
     data["Schedule"]["Days"][6]["Events"][0]["Temperature"] = 300
 
     data["RegulationMode"] = REGULATION_SCHEDULE
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_target_temperature() == 400
 
     data["RegulationMode"] = REGULATION_COMFORT
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_target_temperature() == 2
 
     data["RegulationMode"] = REGULATION_MANUAL
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_target_temperature() == 3
 
     data["RegulationMode"] = REGULATION_VACATION
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_target_temperature() == 4
 
     data["RegulationMode"] = REGULATION_FROST_PROTECTION
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_target_temperature() == 5
 
     data["RegulationMode"] = REGULATION_BOOST
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_target_temperature() == 6
 
     data["RegulationMode"] = REGULATION_ECO
-    thermostat = Thermostat.from_json(data)
+    thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.get_target_temperature() == 300
+
+    data["RegulationMode"] = 42
+    thermostat = Thermostat.from_wd5_json(data)
+    assert thermostat.get_target_temperature() == 0
+
+
+@pytest.mark.asyncio
+async def test_thermostat_from_json_wg4() -> None:
+    """Make sure the data is accepted by the from_wg4_json method."""
+    data = load_fixtures("wg4_thermostat.json")
+    thermostat = Thermostat.from_wg4_json(json.loads(data))
+
+    for field in REQUIRED_FIELDS + WG4_ONLY_FIELDS:
+        assert (
+            getattr(thermostat, field) is not None
+        ), f"Expected {field} to be non-null"
+    for field in WD5_ONLY_FIELDS:
+        assert getattr(thermostat, field) is None, f"Expected {field} to be null"
+
+    assert thermostat.model == "UWG4"
+    assert thermostat.serial_number == "42424242"
+    assert thermostat.software_version == "1012M203"
+    assert thermostat.zone_name == ""
+    assert thermostat.zone_id == -1
+    assert thermostat.name == "RoomName"
+    assert thermostat.online is True
+    assert thermostat.heating is False
+    assert thermostat.regulation_mode == 3
+    assert thermostat.supported_regulation_modes == [
+        REGULATION_SCHEDULE,
+        REGULATION_COMFORT,
+        REGULATION_MANUAL,
+    ]
+    assert thermostat.last_primary_mode_is_auto is False
+    assert thermostat.min_temperature == 500
+    assert thermostat.max_temperature == 4000
+    assert thermostat.temperature == 2200
+    assert thermostat.set_point_temperature == 2600
+    assert isinstance(thermostat.comfort_end_time, datetime)
+    assert thermostat.comfort_temperature == 2000
+    assert thermostat.manual_temperature == 2600
+
+    # Test the getter methods:
+    assert thermostat.get_current_temperature() == 2200
+    assert thermostat.get_target_temperature() == 2600
+
+
+REQUIRED_FIELDS = [
+    "model",
+    "serial_number",
+    "software_version",
+    "zone_name",
+    "zone_id",
+    "name",
+    "online",
+    "heating",
+    "regulation_mode",
+    "supported_regulation_modes",
+    "min_temperature",
+    "max_temperature",
+    "comfort_temperature",
+    "manual_temperature",
+    "comfort_end_time",
+    "last_primary_mode_is_auto",
+]
+
+WG4_ONLY_FIELDS = [
+    "temperature",
+    "set_point_temperature",
+]
+
+WD5_ONLY_FIELDS = [
+    "thermostat_id",
+    "schedule",
+    "adaptive_mode",
+    "open_window_detection",
+    "daylight_saving_active",
+    "sensor_mode",
+    "temperature_floor",
+    "temperature_room",
+    "boost_end_time",
+    "vacation_mode",
+    "vacation_begin_time",
+    "vacation_end_time",
+    "vacation_temperature",
+    "frost_protection_temperature",
+    "boost_temperature",
+]

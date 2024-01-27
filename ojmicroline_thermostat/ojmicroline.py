@@ -10,6 +10,7 @@ from typing import Any
 
 import async_timeout
 from aiohttp import ClientError, ClientSession, hdrs
+from typing_extensions import Protocol
 from yarl import URL
 
 from .const import COMFORT_DURATION
@@ -17,23 +18,91 @@ from .exceptions import (
     OJMicrolineAuthException,
     OJMicrolineConnectionException,
     OJMicrolineException,
-    OJMicrolineResultsException,
     OJMicrolineTimeoutException,
 )
 from .models import Thermostat
-from .requests import UpdateGroupRequest
+
+
+class OJMicrolineAPI(Protocol):
+    """
+    Implements support for a specific OJ Microline API.
+
+    OJ Microline offers various models of thermostats; somewhat unusually,
+    they are managed via distinct APIs that are only vaguely similar.
+    Each implementation of the OJMicrolineAPI protocol supports a group
+    of thermostat models.
+    """
+
+    host: str
+    """The host to use for API requests, without the protocol prefix."""
+
+    login_path: str
+    """HTTP path used to log in and fetch a session id."""
+
+    def login_body(self) -> dict[str, Any]:
+        """Compute HTTP body parameters used when posting to the login path."""
+
+    get_thermostats_path: str
+    """HTTP path used to fetch a list of thermostats."""
+
+    def get_thermostats_params(self) -> dict[str, Any]:
+        """Compute additional query string params for fetching thermostats."""
+
+    def parse_thermostats_response(self, data: Any) -> list[Thermostat]:
+        """
+        Parse an HTTP response containing thermostat data.
+
+        Args:
+            data: The JSON data contained in the response.
+        """
+
+    update_regulation_mode_path: str
+    """HTTP path used to update a thermostat's mode"""
+
+    def update_regulation_mode_params(self, thermostat: Thermostat) -> dict[str, Any]:
+        """
+        Compute additional query string params for posting to the update path.
+
+        Args:
+            thermostat: The Thermostat model.
+        """
+
+    def update_regulation_mode_body(
+        self,
+        thermostat: Thermostat,
+        regulation_mode: int,
+        temperature: int | None,
+        duration: int,
+    ) -> dict[str, Any]:
+        """
+        Compute HTTP body parameters used when posting to the update path.
+
+        Args:
+            thermostat: The Thermostat model.
+            regulation_mode: The mode to set the thermostat to.
+            temperature: The temperature to set or None.
+            duration: The duration in minutes to set the temperature
+                      for (comfort mode only).
+
+        Returns: A dict with values to be used in an HTTP POST body.
+        """
+
+    def parse_update_regulation_mode_response(self, data: Any) -> bool:
+        """
+        Parse the HTTP response received after updating the regulation mode.
+
+        Args:
+            data: The JSON data contained in the response.
+
+        Returns: True if the update succeeded.
+        """
 
 
 @dataclass
 class OJMicroline:
     """Main class for handling data from OJ Microline API."""
 
-    __host: str
-    __api_key: str
-    __customer_id: int
-    __username: str
-    __password: str
-    __client_sw_version: int
+    __api: OJMicrolineAPI
 
     __request_timeout: float = 30.0
     __http_session: ClientSession | None = None
@@ -49,33 +118,16 @@ class OJMicroline:
     __session_calls: int = 300
 
     def __init__(
-        self,
-        host: str,
-        api_key: str,
-        customer_id: int,
-        username: str,
-        password: str,
-        client_sw_version: int = 1060,
-        session: ClientSession | None = None,
+        self, api: OJMicrolineAPI, session: ClientSession | None = None
     ) -> None:
         """
         Create a new OJMicroline instance.
 
         Args:
-            host: The HOST (without protocol) to use for API requests.
-            api_key: The API key to use in requests.
-            customer_id: The customer ID to use in requests.
-            username: The username to log in with.
-            password: The password for the username.
-            client_sw_version: The client software version.
+            api: An object that specifies how to interact with the API.
             session: The session to use, or a new session will be created.
         """
-        self.__host = host
-        self.__api_key = api_key
-        self.__customer_id = customer_id
-        self.__username = username
-        self.__password = password
-        self.__client_sw_version = client_sw_version
+        self.__api = api
         self.__http_session = session
 
     async def _request(
@@ -111,7 +163,9 @@ class OJMicroline:
 
             # Reduce the number of calls left by 1.
             self.__session_calls_left -= 1
-            url = URL.build(scheme="https", host=self.__host, path="/").join(URL(uri))
+            url = URL.build(scheme="https", host=self.__api.host, path="/").join(
+                URL(uri)
+            )
 
             async with async_timeout.timeout(self.__request_timeout):
                 response = await self.__http_session.request(
@@ -155,15 +209,9 @@ class OJMicroline:
         if self.__session_calls_left == 0 or self.__session_id is None:
             # Get a new session.
             data = await self._request(
-                "api/UserProfile/SignIn",
+                self.__api.login_path,
                 method=hdrs.METH_POST,
-                body={
-                    "APIKEY": self.__api_key,
-                    "UserName": self.__username,
-                    "Password": self.__password,
-                    "ClientSWVersion": self.__client_sw_version,
-                    "CustomerId": self.__customer_id,
-                },
+                body=self.__api.login_body(),
             )
 
             if data["ErrorCode"] == 1:
@@ -181,31 +229,18 @@ class OJMicroline:
 
         Returns:
             A list of Thermostats objects.
-
-        Raises:
-            OJMicrolineResultsException: An error occurred while getting thermostats.
         """
         await self.login()
 
-        results: list[Thermostat] = []
         data = await self._request(
-            "api/Group/GroupContents",
+            self.__api.get_thermostats_path,
             method=hdrs.METH_GET,
-            params={"sessionid": self.__session_id, "APIKEY": self.__api_key},
+            params={
+                "sessionid": self.__session_id,
+                **self.__api.get_thermostats_params(),
+            },
         )
-
-        if data["ErrorCode"] == 1:
-            raise OJMicrolineResultsException(
-                "Unable to get thermostats via API.",
-                {"data": data},
-            )
-
-        for group in data["GroupContents"]:
-            for item in group["Thermostats"]:
-                if len(item):
-                    results.append(Thermostat.from_json(item))
-
-        return results
+        return self.__api.parse_thermostats_response(data)
 
     async def set_regulation_mode(
         self,
@@ -222,8 +257,7 @@ class OJMicroline:
         or a string containing the serial number.
 
         Args:
-            resource: The Thermostat model or the serial number of
-                      the thermostat to update.
+            resource: The Thermostat model.
             regulation_mode: The mode to set the thermostat to.
             temperature: The temperature to set or None.
             duration: The duration in minutes to set the temperature
@@ -238,19 +272,22 @@ class OJMicroline:
         if self.__session_id is None:
             await self.login()
 
-        request = UpdateGroupRequest(resource, self.__api_key)
         data = await self._request(
-            "api/Group/UpdateGroup",
+            self.__api.update_regulation_mode_path,
             method=hdrs.METH_POST,
-            params={"sessionid": self.__session_id},
-            body=request.update_regulation_mode(
-                regulation_mode=regulation_mode,
-                temperature=temperature,
-                duration=duration,
+            params={
+                "sessionid": self.__session_id,
+                **self.__api.update_regulation_mode_params(resource),
+            },
+            body=self.__api.update_regulation_mode_body(
+                resource,
+                regulation_mode,
+                temperature,
+                duration,
             ),
         )
 
-        if data["ErrorCode"] == 1:
+        if not self.__api.parse_update_regulation_mode_response(data):
             raise OJMicrolineException("Unable to set preset mode.")
 
         return True
