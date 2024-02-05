@@ -31,9 +31,10 @@ python = "^3.9"
 yarl = ">=1.6.0"
 
 [tool.poetry.group.dev.dependencies]
-aresponses = "^2.1.6"
+aresponses = "^3.0.0"
+async_timeout = "^4.0.3"
 bandit = "^1.7.4"
-black = ">=22.12,<24.0"
+black = ">=22.12,<25.0"
 blacken-docs = "^1.12.1"
 codespell = "^2.2.2"
 coverage = {version = "^7.0.4", extras = ["toml"]}
