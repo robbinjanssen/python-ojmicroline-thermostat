@@ -235,7 +235,7 @@ poetry run pytest
 
 MIT License
 
-Copyright (c) 2020-2023 Robbin Janssen
+Copyright (c) 2020-2024 Robbin Janssen
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -268,7 +268,7 @@ SOFTWARE.
 [issues-url]: https://github.com/robbinjanssen/python-ojmicroline-thermostat/issues
 [license-shield]: https://img.shields.io/github/license/robbinjanssen/python-ojmicroline-thermostat.svg
 [last-commit-shield]: https://img.shields.io/github/last-commit/robbinjanssen/python-ojmicroline-thermostat.svg
-[maintenance-shield]: https://img.shields.io/maintenance/yes/2023.svg
+[maintenance-shield]: https://img.shields.io/maintenance/yes/2024.svg
 [maintainability-shield]: https://api.codeclimate.com/v1/badges/d77f7409eb02e331261b/maintainability
 [maintainability-url]: https://codeclimate.com/github/robbinjanssen/python-ojmicroline-thermostat/maintainability
 [project-stage-shield]: https://img.shields.io/badge/project%20stage-experimental-yellow.svg
