@@ -1,4 +1,4 @@
-# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-instance-attributes,too-many-return-statements
 """Thermostat model for OJ Microline Thermostat."""
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from ..const import (
     SENSOR_FLOOR,
     SENSOR_ROOM,
     SENSOR_ROOM_FLOOR,
+    WG4_DATETIME_FORMAT,
 )
 from .schedule import Schedule
 
@@ -27,7 +28,6 @@ from .schedule import Schedule
 class Thermostat:
     """Object representing a Thermostat model response from the API."""
 
-    thermostat_id: int
     model: str
     serial_number: str
     software_version: str
@@ -36,29 +36,40 @@ class Thermostat:
     name: str
     online: bool
     heating: bool
-    adaptive_mode: bool
-    vacation_mode: bool
-    open_window_detection: bool
-    last_primary_mode_is_auto: bool
-    daylight_saving_active: bool
     regulation_mode: int
-    sensor_mode: int
-    temperature_floor: int
-    temperature_room: int
+    supported_regulation_modes: list[int]
     min_temperature: int
     max_temperature: int
-    temperatures: dict[int, int]
-    boost_end_time: datetime
+    manual_temperature: int
+    comfort_temperature: int
     comfort_end_time: datetime
-    vacation_begin_time: datetime
-    vacation_end_time: datetime
-    offset: int
-    schedule: dict[str, Any]
+    last_primary_mode_is_auto: bool
+
+    # WD5-only fields:
+    thermostat_id: int | None = None
+    schedule: dict[str, Any] | None = None
+    adaptive_mode: bool | None = None
+    open_window_detection: bool | None = None
+    daylight_saving_active: bool | None = None
+    sensor_mode: int | None = None
+    temperature_floor: int | None = None
+    temperature_room: int | None = None
+    boost_end_time: datetime | None = None
+    vacation_mode: bool | None = None
+    vacation_begin_time: datetime | None = None
+    vacation_end_time: datetime | None = None
+    vacation_temperature: int | None = None
+    frost_protection_temperature: int | None = None
+    boost_temperature: int | None = None
+
+    # WG4-only fields:
+    temperature: int | None = None
+    set_point_temperature: int | None = None
 
     @classmethod
-    def from_json(cls, data: dict[str, Any]) -> Thermostat:
+    def from_wd5_json(cls, data: dict[str, Any]) -> Thermostat:
         """
-        Return a new Thermostat instance based on the given JSON.
+        Return a new Thermostat instance based on JSON from the WD5-series API.
 
         Args:
             data: The JSON data from the API.
@@ -66,13 +77,10 @@ class Thermostat:
         Returns:
             A Thermostat Object.
         """
-
-        schedule = Schedule.from_json(data["Schedule"])
         time_zone = data["TimeZone"]
-        regulation_mode = data["RegulationMode"]
-
         return cls(
             thermostat_id=data["Id"],
+            # Technically this could be a OWD5 or MWD5:
             model="OWD5",
             serial_number=data["SerialNumber"],
             software_version=data["SWversion"],
@@ -81,32 +89,81 @@ class Thermostat:
             name=data["ThermostatName"],
             online=data["Online"],
             heating=data["Heating"],
-            regulation_mode=regulation_mode,
+            regulation_mode=data["RegulationMode"],
+            supported_regulation_modes=[
+                REGULATION_SCHEDULE,
+                REGULATION_COMFORT,
+                REGULATION_MANUAL,
+                REGULATION_VACATION,
+                REGULATION_FROST_PROTECTION,
+                REGULATION_BOOST,
+                REGULATION_ECO,
+            ],
             sensor_mode=data["SensorAppl"],
             adaptive_mode=data["AdaptiveMode"],
             open_window_detection=data["OpenWindow"],
             last_primary_mode_is_auto=data["LastPrimaryModeIsAuto"],
             daylight_saving_active=data["DaylightSavingActive"],
-            vacation_mode=data["VacationEnabled"],
             temperature_floor=data["FloorTemperature"],
             temperature_room=data["RoomTemperature"],
             min_temperature=data["MinSetpoint"],
             max_temperature=data["MaxSetpoint"],
+            comfort_temperature=data["ComfortSetpoint"],
+            manual_temperature=data["ManualModeSetpoint"],
+            frost_protection_temperature=data["FrostProtectionTemperature"],
+            boost_temperature=data["MaxSetpoint"],
             boost_end_time=parse_date(data["BoostEndTime"], time_zone),
             comfort_end_time=parse_date(data["ComfortEndTime"], time_zone),
+            vacation_mode=data["VacationEnabled"],
             vacation_begin_time=parse_date(data["VacationBeginDay"], time_zone),
             vacation_end_time=parse_date(data["VacationEndDay"], time_zone),
-            offset=time_zone,
+            vacation_temperature=data["VacationTemperature"],
             schedule=data["Schedule"],
-            temperatures={
-                REGULATION_SCHEDULE: schedule.get_active_temperature(),
-                REGULATION_COMFORT: data["ComfortSetpoint"],
-                REGULATION_MANUAL: data["ManualModeSetpoint"],
-                REGULATION_VACATION: data["VacationTemperature"],
-                REGULATION_FROST_PROTECTION: data["FrostProtectionTemperature"],
-                REGULATION_BOOST: data["MaxSetpoint"],
-                REGULATION_ECO: schedule.get_lowest_temperature(),
-            },
+        )
+
+    @classmethod
+    def from_wg4_json(cls, data: dict[str, Any]) -> Thermostat:
+        """
+        Return a new Thermostat instance based on JSON from the WG4-series API.
+
+        The WG4 API does return vacation-related fields but does not actually
+        implement any sort of vacation mode, so those fields are ignored.
+
+        The WG4 API does return schedule data but it is currently ignored.
+
+        Args:
+            data: The JSON data from the API.
+
+        Returns:
+            A Thermostat Object.
+        """
+        return cls(
+            # Technically this could be a UWG4 or AWG4:
+            model="UWG4",
+            serial_number=data["SerialNumber"],
+            software_version=data["SWVersion"],
+            zone_name=data["GroupName"],
+            zone_id=data["GroupId"],
+            name=data["Room"],
+            online=data["Online"],
+            heating=data["Heating"],
+            regulation_mode=data["RegulationMode"],
+            supported_regulation_modes=[
+                REGULATION_SCHEDULE,
+                REGULATION_COMFORT,
+                REGULATION_MANUAL,
+            ],
+            last_primary_mode_is_auto=data["LastPrimaryModeIsAuto"],
+            temperature=data["Temperature"],
+            set_point_temperature=data["SetPointTemp"],
+            min_temperature=data["MinTemp"],
+            max_temperature=data["MaxTemp"],
+            comfort_temperature=data["ComfortTemperature"],
+            manual_temperature=data["ManualTemperature"],
+            comfort_end_time=datetime.strptime(
+                _fix_wg4_date(data["ComfortEndTime"]),
+                WG4_DATETIME_FORMAT,
+            ),
         )
 
     def get_target_temperature(self) -> int:
@@ -116,24 +173,51 @@ class Thermostat:
         Returns:
             The current temperature.
         """
-        return self.temperatures[self.regulation_mode]
+        # The WG4 API makes this easy:
+        if self.set_point_temperature is not None:
+            return self.set_point_temperature
+
+        # The OWD5 API requires computing the value:
+        if self.regulation_mode == REGULATION_SCHEDULE and self.schedule:
+            return Schedule.from_json(self.schedule).get_active_temperature()
+        if self.regulation_mode == REGULATION_COMFORT:
+            return self.comfort_temperature
+        if self.regulation_mode == REGULATION_MANUAL:
+            return self.manual_temperature
+        if self.regulation_mode == REGULATION_VACATION:
+            return self.vacation_temperature or 0
+        if self.regulation_mode == REGULATION_FROST_PROTECTION:
+            return self.frost_protection_temperature or 0
+        if self.regulation_mode == REGULATION_BOOST:
+            return self.boost_temperature or 0
+        if self.regulation_mode == REGULATION_ECO and self.schedule:
+            return Schedule.from_json(self.schedule).get_lowest_temperature()
+
+        return 0
 
     def get_current_temperature(self) -> int:
         """
         Return the current temperature for the thermostat.
 
-        Get the current temperature based on the sensor type. If it is
-        set to room / floor, then the average is used.
+        For WD5-series thermostats, the current temperature based on the
+        sensor type. If it is set to room/floor, then the average is used.
 
         Returns:
             The current temperature.
         """
+
+        # Once again, this is easy with the WG4 API:
+        if self.temperature is not None:
+            return self.temperature
+
         if self.sensor_mode == SENSOR_ROOM:
-            return self.temperature_room
+            return self.temperature_room or 0
         if self.sensor_mode == SENSOR_FLOOR:
-            return self.temperature_floor
+            return self.temperature_floor or 0
         if self.sensor_mode == SENSOR_ROOM_FLOOR:
-            return ceil((self.temperature_floor + self.temperature_room) / 2)
+            return ceil(
+                ((self.temperature_floor or 0) + (self.temperature_room or 0)) / 2
+            )
 
         return 0
 
@@ -153,3 +237,19 @@ def parse_date(value: str, offset: int) -> datetime:
     separator = "+" if offset >= 0 else "-"
 
     return datetime.strptime(f"{value}{separator}{timezone}", "%Y-%m-%dT%H:%M:%S%z")
+
+
+def _fix_wg4_date(value: str) -> str:
+    """
+    Fix corrupt date formats used by the WG4 API.
+
+    Bizarrely the WG4 API sometimes--but not always--sends dates of the form:
+    28/01/2024 23:29:00 +00:00 +00:00
+
+    Args:
+        value: The raw date string from API JSON.
+
+    Returns:
+        A fixed version of the string.
+    """
+    return "+".join(value.split("+")[:2]).strip()

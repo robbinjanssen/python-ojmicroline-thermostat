@@ -3,9 +3,8 @@
 import asyncio
 from time import sleep
 
-from ojmicroline_thermostat import OJMicroline
+from ojmicroline_thermostat import WD5API, OJMicroline
 from ojmicroline_thermostat.const import (
-    DATETIME_FORMAT,
     REGULATION_BOOST,
     REGULATION_COMFORT,
     REGULATION_ECO,
@@ -34,15 +33,18 @@ SENSOR_MODES = {
     SENSOR_ROOM_FLOOR: "Room/Floor",
 }
 
+DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S"
+
 
 async def main() -> None:
     """Show example on using the OJ Microline client."""
     async with OJMicroline(  # noqa: S106
-        host="ocd5.azurewebsites.net",
-        customer_id=99,
-        api_key="<app-api-key>",
-        username="<your-username>",
-        password="<your-password>",
+        api=WD5API(
+            customer_id=99,
+            api_key="<app-api-key>",
+            username="<your-username>",
+            password="<your-password>",
+        ),
     ) as client:
         # fmt: off
         thermostats = await client.get_thermostats()
@@ -56,30 +58,34 @@ async def main() -> None:
             print(f"   Serial Number: {resource.serial_number}")
             print(f"   Software Version: {resource.software_version}")
             print(f"   Zone: {resource.zone_name} ({resource.zone_id})")
-            print(f"   Sensor mode: {SENSOR_MODES[resource.sensor_mode]}")
+            if resource.sensor_mode is not None:
+                print(f"   Sensor mode: {SENSOR_MODES[resource.sensor_mode]}")
             print("- Regulation:")
             print(f"   Mode: {REGULATION_MODES[resource.regulation_mode]}")
             print(f"   Temperature: {resource.get_current_temperature()}")
             print(f"   Target temperature: {resource.get_target_temperature()}")
             print("- Temperatures:")
-            print(f"   Floor: {resource.temperature_floor}")
-            print(f"   Room: {resource.temperature_room}")
-            print(f"   Min: {resource.min_temperature}")
-            print(f"   Max: {resource.max_temperature}")
-            for mode, name in REGULATION_MODES.items():
-                print(f"   {name}: {resource.temperatures[mode]}")
+            print(f"   Current: {resource.get_current_temperature()}")
+            print(f"   Target: {resource.get_target_temperature()}")
+            print(f"   Range: {resource.min_temperature} - {resource.max_temperature}")
             print("- Dates:")
             print(f"   Comfort End: {resource.comfort_end_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
-            print(f"   Boost End: {resource.boost_end_time.strftime(DATETIME_FORMAT)}")
-            print(f"   Vacation Begin: {resource.vacation_begin_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
-            print(f"   Vacation End: {resource.vacation_end_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
+            if resource.boost_end_time is not None:
+                print(f"   Boost End: {resource.boost_end_time.strftime(DATETIME_FORMAT)}")
+            if resource.vacation_begin_time is not None:
+                print(f"   Vacation Begin: {resource.vacation_begin_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
+            if resource.vacation_end_time is not None:
+                print(f"   Vacation End: {resource.vacation_end_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
             print("- Status:")
             print(f"   Online: {resource.online}")
             print(f"   Heating: {resource.heating}")
             print(f"   Adaptive Mode: {resource.adaptive_mode}")
-            print(f"   Vacation Mode: {resource.vacation_mode}")
-            print(f"   Open Window Detection: {resource.open_window_detection}")
-            print(f"   Daylight Saving: {resource.daylight_saving_active}")
+            if resource.vacation_mode is not None:
+                print(f"   Vacation Mode: {resource.vacation_mode}")
+            if resource.open_window_detection is not None:
+                print(f"   Open Window Detection: {resource.open_window_detection}")
+            if resource.daylight_saving_active is not None:
+                print(f"   Daylight Saving: {resource.daylight_saving_active}")
             print(f"   Last Primary Mode is auto: {resource.last_primary_mode_is_auto}")
             print("")
 
@@ -92,10 +98,11 @@ async def main() -> None:
             print("Sleeping for 5 seconds..")
             sleep(5)
 
-            print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")  # noqa: E501
-            await client.set_regulation_mode(resource, REGULATION_BOOST)
-            print("Sleeping for 5 seconds..")
-            sleep(5)
+            if REGULATION_BOOST in resource.supported_regulation_modes:
+                print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")  # noqa: E501
+                await client.set_regulation_mode(resource, REGULATION_BOOST)
+                print("Sleeping for 5 seconds..")
+                sleep(5)
 
             print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")  # noqa: E501
             await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
