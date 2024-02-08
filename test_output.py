@@ -1,5 +1,5 @@
 # ruff: noqa: S106, E501, PLR0915
-# pylint: disable=too-many-arguments
+# pylint: disable=too-many-statements
 """Asynchronous Python client for OJ Microline Thermostat."""
 import asyncio
 from asyncio import sleep
