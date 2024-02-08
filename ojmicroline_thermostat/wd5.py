@@ -1,10 +1,11 @@
+# ruff: noqa: PLR0913, PERF401
 # pylint: disable=too-many-arguments
 """Implementation of OJMicrolineAPI for WD5-series thermostats."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from .const import (
     REGULATION_BOOST,
@@ -13,7 +14,7 @@ from .const import (
     REGULATION_SCHEDULE,
     WD5_DATETIME_FORMAT,
 )
-from .exceptions import OJMicrolineResultsException
+from .exceptions import OJMicrolineResultsError
 from .models import Thermostat
 from .ojmicroline import OJMicrolineAPI
 
@@ -31,10 +32,10 @@ class WD5API(OJMicrolineAPI):
         client_sw_version: int = 1060,
         host: str = "ocd5.azurewebsites.net",
     ) -> None:
-        """
-        Create a new instance of the API object.
+        """Create a new instance of the API object.
 
         Args:
+        ----
             api_key: The API key to use in requests.
             customer_id: The customer ID to use in requests.
             username: The username to log in with.
@@ -67,10 +68,8 @@ class WD5API(OJMicrolineAPI):
 
     def parse_thermostats_response(self, data: Any) -> list[Thermostat]:  # noqa: D102
         if data["ErrorCode"] == 1:
-            raise OJMicrolineResultsException(
-                "Unable to get thermostats via API.",
-                {"data": data},
-            )
+            msg = "Unable to get thermostats via API."
+            raise OJMicrolineResultsError(msg, {"data": data})
 
         results: list[Thermostat] = []
         for group in data["GroupContents"]:
@@ -82,7 +81,8 @@ class WD5API(OJMicrolineAPI):
     update_regulation_mode_path: str = "api/Group/UpdateGroup"
 
     def update_regulation_mode_params(  # noqa: D102
-        self, thermostat: Thermostat
+        self,
+        thermostat: Thermostat,  # noqa: ARG002
     ) -> dict[str, Any]:
         return {}
 
@@ -94,14 +94,18 @@ class WD5API(OJMicrolineAPI):
         duration: int,
     ) -> dict[str, Any]:
         if regulation_mode == REGULATION_COMFORT:
-            comfort_end_time = datetime.today() + timedelta(minutes=duration)
+            comfort_end_time = (
+                datetime.now(tz=UTC) + timedelta(minutes=duration)
+            ).astimezone()
             comfort_temperature = temperature or thermostat.comfort_temperature
         else:
             comfort_end_time = thermostat.comfort_end_time
             comfort_temperature = thermostat.comfort_temperature
 
         if regulation_mode == REGULATION_BOOST:
-            boost_end_time: Optional[datetime] = datetime.today() + timedelta(hours=1)
+            boost_end_time: datetime | None = (
+                datetime.now(tz=UTC) + timedelta(hours=1)
+            ).astimezone()
         else:
             boost_end_time = thermostat.boost_end_time
 
@@ -139,5 +143,5 @@ class WD5API(OJMicrolineAPI):
         return data["ErrorCode"] != 1
 
 
-def _fmt(d: Optional[datetime]) -> Any:
+def _fmt(d: datetime | None) -> Any:
     return None if d is None else d.strftime(WD5_DATETIME_FORMAT)

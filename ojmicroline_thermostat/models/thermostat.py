@@ -1,14 +1,15 @@
+# ruff: noqa: PLR0911
 # pylint: disable=too-many-instance-attributes,too-many-return-statements
 """Thermostat model for OJ Microline Thermostat."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import ceil
 from time import gmtime, strftime
 from typing import Any
 
-from ..const import (
+from ojmicroline_thermostat.const import (
     REGULATION_BOOST,
     REGULATION_COMFORT,
     REGULATION_ECO,
@@ -21,6 +22,7 @@ from ..const import (
     SENSOR_ROOM_FLOOR,
     WG4_DATETIME_FORMAT,
 )
+
 from .schedule import Schedule
 
 
@@ -68,13 +70,14 @@ class Thermostat:
 
     @classmethod
     def from_wd5_json(cls, data: dict[str, Any]) -> Thermostat:
-        """
-        Return a new Thermostat instance based on JSON from the WD5-series API.
+        """Return a new Thermostat instance based on JSON from the WD5-series API.
 
         Args:
+        ----
             data: The JSON data from the API.
 
         Returns:
+        -------
             A Thermostat Object.
         """
         time_zone = data["TimeZone"]
@@ -112,19 +115,18 @@ class Thermostat:
             manual_temperature=data["ManualModeSetpoint"],
             frost_protection_temperature=data["FrostProtectionTemperature"],
             boost_temperature=data["MaxSetpoint"],
-            boost_end_time=parse_date(data["BoostEndTime"], time_zone),
-            comfort_end_time=parse_date(data["ComfortEndTime"], time_zone),
+            boost_end_time=parse_wd5_date(data["BoostEndTime"], time_zone),
+            comfort_end_time=parse_wd5_date(data["ComfortEndTime"], time_zone),
             vacation_mode=data["VacationEnabled"],
-            vacation_begin_time=parse_date(data["VacationBeginDay"], time_zone),
-            vacation_end_time=parse_date(data["VacationEndDay"], time_zone),
+            vacation_begin_time=parse_wd5_date(data["VacationBeginDay"], time_zone),
+            vacation_end_time=parse_wd5_date(data["VacationEndDay"], time_zone),
             vacation_temperature=data["VacationTemperature"],
             schedule=data["Schedule"],
         )
 
     @classmethod
     def from_wg4_json(cls, data: dict[str, Any]) -> Thermostat:
-        """
-        Return a new Thermostat instance based on JSON from the WG4-series API.
+        """Return a new Thermostat instance based on JSON from the WG4-series API.
 
         The WG4 API does return vacation-related fields but does not actually
         implement any sort of vacation mode, so those fields are ignored.
@@ -132,9 +134,11 @@ class Thermostat:
         The WG4 API does return schedule data but it is currently ignored.
 
         Args:
+        ----
             data: The JSON data from the API.
 
         Returns:
+        -------
             A Thermostat Object.
         """
         return cls(
@@ -160,17 +164,14 @@ class Thermostat:
             max_temperature=data["MaxTemp"],
             comfort_temperature=data["ComfortTemperature"],
             manual_temperature=data["ManualTemperature"],
-            comfort_end_time=datetime.strptime(
-                _fix_wg4_date(data["ComfortEndTime"]),
-                WG4_DATETIME_FORMAT,
-            ),
+            comfort_end_time=parse_wg4_date(data["ComfortEndTime"]),
         )
 
     def get_target_temperature(self) -> int:
-        """
-        Return the target temperature for the thermostat.
+        """Return the target temperature for the thermostat.
 
-        Returns:
+        Returns
+        -------
             The current temperature.
         """
         # The WG4 API makes this easy:
@@ -196,16 +197,15 @@ class Thermostat:
         return 0
 
     def get_current_temperature(self) -> int:
-        """
-        Return the current temperature for the thermostat.
+        """Return the current temperature for the thermostat.
 
         For WD5-series thermostats, the current temperature based on the
         sensor type. If it is set to room/floor, then the average is used.
 
-        Returns:
+        Returns
+        -------
             The current temperature.
         """
-
         # Once again, this is easy with the WG4 API:
         if self.temperature is not None:
             return self.temperature
@@ -222,34 +222,44 @@ class Thermostat:
         return 0
 
 
-def parse_date(value: str, offset: int) -> datetime:
-    """
-    Parse a given value and offset into a datetime object.
+def parse_wd5_date(value: str, offset: int) -> datetime:
+    """Parse a given value and offset into a datetime object.
 
     Args:
+    ----
         value: The date time string.
         offset: The time zone offset in seconds.
 
     Returns:
+    -------
         The parsed datetime.
     """
     timezone = strftime("%H:%M", gmtime(abs(offset)))
     separator = "+" if offset >= 0 else "-"
 
-    return datetime.strptime(f"{value}{separator}{timezone}", "%Y-%m-%dT%H:%M:%S%z")
+    value = f"{value}{separator}{timezone}"
+    seconds = timedelta(seconds=offset)
+
+    if offset >= 0:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S%z") - seconds
+
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S%z") + seconds
 
 
-def _fix_wg4_date(value: str) -> str:
-    """
-    Fix corrupt date formats used by the WG4 API.
+def parse_wg4_date(value: str) -> datetime:
+    """Fix corrupt date formats used by the WG4 API.
 
     Bizarrely the WG4 API sometimes--but not always--sends dates of the form:
     28/01/2024 23:29:00 +00:00 +00:00
 
     Args:
+    ----
         value: The raw date string from API JSON.
 
     Returns:
-        A fixed version of the string.
+    -------
+        The parsed datetime.
     """
-    return "+".join(value.split("+")[:2]).strip()
+    value = "+".join(value.split("+")[:2]).strip()
+
+    return datetime.strptime(value, WG4_DATETIME_FORMAT).astimezone()

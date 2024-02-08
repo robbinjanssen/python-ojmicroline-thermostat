@@ -1,10 +1,11 @@
 """Asynchronous Python client communicating with the OJ Microline API."""
+from pathlib import Path
 
-import os
+
+def _fixture_path(filename: str) -> Path:
+    return Path(__file__).parent / "fixtures" / filename
 
 
 def load_fixtures(filename: str) -> str:
     """Load a fixture."""
-    path = os.path.join(os.path.dirname(__file__), "fixtures", filename)
-    with open(path, encoding="utf-8") as fptr:
-        return fptr.read()
+    return _fixture_path(filename).read_text(encoding="utf-8")

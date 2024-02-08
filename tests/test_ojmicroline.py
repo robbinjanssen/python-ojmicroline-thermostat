@@ -8,13 +8,12 @@ from unittest.mock import patch
 import aiohttp
 import pytest
 from aresponses import Response, ResponsesMockServer  # type: ignore[import]
-
 from ojmicroline_thermostat import (
     WG4API,
     OJMicroline,
-    OJMicrolineConnectionException,
-    OJMicrolineException,
-    OJMicrolineTimeoutException,
+    OJMicrolineConnectionError,
+    OJMicrolineError,
+    OJMicrolineTimeoutError,
 )
 
 from . import load_fixtures
@@ -75,7 +74,7 @@ async def test_timeout(monkeypatch, aresponses: ResponsesMockServer) -> None:
         )
         monkeypatch.setattr(client, "_OJMicroline__request_timeout", 0.1)
 
-        with pytest.raises(OJMicrolineTimeoutException):
+        with pytest.raises(OJMicrolineTimeoutError):
             assert await client._request("test")
 
 
@@ -102,7 +101,7 @@ async def test_content_type(aresponses: ResponsesMockServer) -> None:
             session=session,
         )
 
-        with pytest.raises(OJMicrolineException):
+        with pytest.raises(OJMicrolineError):
             assert await client._request("test")
 
 
@@ -121,7 +120,7 @@ async def test_client_error() -> None:
 
         with (
             patch.object(session, "request", side_effect=aiohttp.ClientError),
-            pytest.raises(OJMicrolineConnectionException),
+            pytest.raises(OJMicrolineConnectionError),
         ):
             assert await client._request("test")
 
