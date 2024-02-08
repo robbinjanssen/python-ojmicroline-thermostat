@@ -6,53 +6,35 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  DEFAULT_PYTHON: "3.11"
+
 jobs:
   pytest:
-    name: Python ${{ matrix.python }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}-latest
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        os: [ubuntu]
-        python: ["3.9", "3.10", "3.11"]
+        python: ["3.11", "3.12"]
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.1.1
+
+      - name: Set up Poetry
+        run: pipx install poetry
 
       - name: Set up Python ${{ matrix.python }}
         id: python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.0.0
         with:
           python-version: ${{ matrix.python }}
-
-      - name: Set pip cache dir
-        id: pip-cache
-        run: |
-          echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
-
-      - name: Restore cached Python pip packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: pip-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-${{ hashFiles('.github/workflows/requirements.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-
+          cache: "poetry"
 
       - name: Install workflow dependencies
         run: |
-          pip install -r .github/workflows/requirements.txt
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-
-      - name: Restore cached Python venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: >-
-            venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
-            venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-
 
       - name: Install dependencies
         run: poetry install --no-interaction
@@ -61,9 +43,9 @@ jobs:
         run: poetry run pytest --cov ojmicroline_thermostat tests
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.3.1
         with:
-          name: coverage-${{ matrix.python }}-${{ matrix.os }}
+          name: coverage-${{ matrix.python }}
           path: .coverage
 
   coverage:
@@ -71,44 +53,27 @@ jobs:
     needs: pytest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.1.1
+        with:
+          fetch-depth: 0
 
       - name: Download coverage data
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.2
 
-      - name: Set up Python 3.9
+      - name: Set up Poetry
+        run: pipx install poetry
+
+      - name: Set up Python ${{ matrix.python }}
         id: python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.0.0
         with:
-          python-version: '3.9'
-
-      - name: Set pip cache dir
-        id: pip-cache
-        run: |
-          echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
-
-      - name: Restore cached Python pip packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: pip-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-${{ hashFiles('.github/workflows/requirements.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-
+          python-version: ${{ matrix.python }}
+          cache: "poetry"
 
       - name: Install workflow dependencies
         run: |
-          pip install -r .github/workflows/requirements.txt
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-
-      - name: Restore cached Python venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: >-
-            venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
-            venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-
 
       - name: Install dependencies
         run: poetry install --no-interaction
@@ -119,4 +84,4 @@ jobs:
           poetry run coverage xml -i
 
       - name: Upload coverage report
-        uses: codecov/codecov-action@v4.0.0-beta.3
+        uses: codecov/codecov-action@v3.1.6

@@ -5,6 +5,9 @@ on:
   release:
     types: [published]
 
+env:
+  DEFAULT_PYTHON: "3.11"
+
 jobs:
   release:
     name: Releasing to PyPi
@@ -12,41 +15,22 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.1.1
 
-      - name: Set up Python 3.9
+      - name: Set up Poetry
+        run: pipx install poetry
+
+      - name: Set up Python ${{ env.DEFAULT_PYTHON }}
         id: python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.0.0
         with:
-          python-version: '3.9'
-
-      - name: Set pip cache dir
-        id: pip-cache
-        run: |
-          echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
-
-      - name: Restore cached Python pip packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: pip-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-${{ hashFiles('.github/workflows/requirements.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-
+          python-version: ${{ env.DEFAULT_PYTHON }}
+          cache: "poetry"
 
       - name: Install workflow dependencies
         run: |
-          pip install -r .github/workflows/requirements.txt
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-
-      - name: Restore cached Python venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: >-
-            venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
-            venv-${{ runner.os }}-v2-${{ steps.python.outputs.python-version }}-
 
       - name: Install dependencies
         run: poetry install --no-interaction

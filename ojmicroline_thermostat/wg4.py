@@ -1,9 +1,10 @@
+# ruff: noqa: PERF401
 """Implementation of OJMicrolineAPI for WG4-series thermostats."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .const import REGULATION_COMFORT, REGULATION_MANUAL
@@ -18,10 +19,10 @@ class WG4API(OJMicrolineAPI):
     def __init__(
         self, username: str, password: str, host: str = "mythermostat.info"
     ) -> None:
-        """
-        Create a new instance of the API object.
+        """Create a new instance of the API object.
 
         Args:
+        ----
             username: The username to log in with.
             password: The password for the username.
             host: The host name used for API requests.
@@ -62,7 +63,7 @@ class WG4API(OJMicrolineAPI):
 
     def update_regulation_mode_body(  # noqa: D102
         self,
-        thermostat: Thermostat,
+        thermostat: Thermostat,  # noqa: ARG002
         regulation_mode: int,
         temperature: int | None,
         duration: int,
@@ -73,7 +74,7 @@ class WG4API(OJMicrolineAPI):
                 "ManualTemperature": temperature,
             }
         elif regulation_mode == REGULATION_COMFORT:
-            end = datetime.now(tz=timezone.utc) + timedelta(minutes=duration)
+            end = datetime.now(tz=UTC) + timedelta(minutes=duration)
             extras = {
                 "ComfortTemperature": temperature,
                 "ComfortEndTime": end.strftime("%d/%m/%Y %H:%M:00 +00:00"),

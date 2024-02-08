@@ -1,4 +1,3 @@
-# pylint: disable=too-many-arguments
 """Asynchronous Python client communicating with the OJ Microline API."""
 from __future__ import annotations
 
@@ -6,7 +5,7 @@ import asyncio
 import json
 import socket
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self
 
 import async_timeout
 from aiohttp import ClientError, ClientSession, hdrs
@@ -15,17 +14,18 @@ from yarl import URL
 
 from .const import COMFORT_DURATION
 from .exceptions import (
-    OJMicrolineAuthException,
-    OJMicrolineConnectionException,
-    OJMicrolineException,
-    OJMicrolineTimeoutException,
+    OJMicrolineAuthError,
+    OJMicrolineConnectionError,
+    OJMicrolineError,
+    OJMicrolineTimeoutError,
 )
-from .models import Thermostat
+
+if TYPE_CHECKING:
+    from .models import Thermostat
 
 
 class OJMicrolineAPI(Protocol):
-    """
-    Implements support for a specific OJ Microline API.
+    """Implements support for a specific OJ Microline API.
 
     OJ Microline offers various models of thermostats; somewhat unusually,
     they are managed via distinct APIs that are only vaguely similar.
@@ -49,10 +49,10 @@ class OJMicrolineAPI(Protocol):
         """Compute additional query string params for fetching thermostats."""
 
     def parse_thermostats_response(self, data: Any) -> list[Thermostat]:
-        """
-        Parse an HTTP response containing thermostat data.
+        """Parse an HTTP response containing thermostat data.
 
         Args:
+        ----
             data: The JSON data contained in the response.
         """
 
@@ -60,10 +60,10 @@ class OJMicrolineAPI(Protocol):
     """HTTP path used to update a thermostat's mode"""
 
     def update_regulation_mode_params(self, thermostat: Thermostat) -> dict[str, Any]:
-        """
-        Compute additional query string params for posting to the update path.
+        """Compute additional query string params for posting to the update path.
 
         Args:
+        ----
             thermostat: The Thermostat model.
         """
 
@@ -74,10 +74,10 @@ class OJMicrolineAPI(Protocol):
         temperature: int | None,
         duration: int,
     ) -> dict[str, Any]:
-        """
-        Compute HTTP body parameters used when posting to the update path.
+        """Compute HTTP body parameters used when posting to the update path.
 
         Args:
+        ----
             thermostat: The Thermostat model.
             regulation_mode: The mode to set the thermostat to.
             temperature: The temperature to set or None.
@@ -88,10 +88,10 @@ class OJMicrolineAPI(Protocol):
         """
 
     def parse_update_regulation_mode_response(self, data: Any) -> bool:
-        """
-        Parse the HTTP response received after updating the regulation mode.
+        """Parse the HTTP response received after updating the regulation mode.
 
         Args:
+        ----
             data: The JSON data contained in the response.
 
         Returns: True if the update succeeded.
@@ -120,10 +120,10 @@ class OJMicroline:
     def __init__(
         self, api: OJMicrolineAPI, session: ClientSession | None = None
     ) -> None:
-        """
-        Create a new OJMicroline instance.
+        """Create a new OJMicroline instance.
 
         Args:
+        ----
             api: An object that specifies how to interact with the API.
             session: The session to use, or a new session will be created.
         """
@@ -138,23 +138,25 @@ class OJMicroline:
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
-        """
-        Handle a request to the OJ Microline API.
+        """Handle a request to the OJ Microline API.
 
         Args:
+        ----
             uri: Request URI, without '/', for example, 'status'
             method: HTTP method to use, for example, 'GET'
             params: Extra options to improve or limit the response.
             body: Data can be used in a POST and PATCH request.
 
         Returns:
+        -------
             A Python dictionary (text) with the response from
             the API.
 
         Raises:
-            OJMicrolineTimeoutException: A timeout occurred.
-            OJMicrolineConnectionException: An error occurred.
-            OJMicrolineException: Received an unexpected response from the API.
+        ------
+            OJMicrolineTimeoutError: A timeout occurred.
+            OJMicrolineConnectionError: An error occurred.
+            OJMicrolineError: Received an unexpected response from the API.
         """
         try:
             if self.__http_session is None:
@@ -181,30 +183,28 @@ class OJMicroline:
                 )
                 response.raise_for_status()
         except asyncio.TimeoutError as exception:
-            raise OJMicrolineTimeoutException(
-                "Timeout occurred while connecting to the OJ Microline API.",
-            ) from exception
+            msg = "Timeout occurred while connecting to the OJ Microline API."
+            raise OJMicrolineTimeoutError(msg) from exception
         except (ClientError, socket.gaierror) as exception:
-            raise OJMicrolineConnectionException(
-                "Error occurred while communicating with the OJ Microline API."
-            ) from exception
+            msg = "Error occurred while communicating with the OJ Microline API."
+            raise OJMicrolineConnectionError(msg) from exception
 
         content_type = response.headers.get("Content-Type", "")
         if not any(item in content_type for item in ["application/json"]):
             text = await response.text()
-            raise OJMicrolineException(
-                "Unexpected content type response from the OJ Microline API",
-                {"Content-Type": content_type, "response": text},
+            msg = "Unexpected content type response from the OJ Microline API"
+            raise OJMicrolineError(
+                msg, {"Content-Type": content_type, "response": text}
             )
 
         return json.loads(await response.text())
 
     async def login(self) -> None:
-        """
-        Get a valid session to do requests with the OJ Microline API.
+        """Get a valid session to do requests with the OJ Microline API.
 
-        Raises:
-            OJMicrolineAuthException: An error occurred while authenticating.
+        Raises
+        ------
+            OJMicrolineAuthError: An error occurred while authenticating.
         """
         if self.__session_calls_left == 0 or self.__session_id is None:
             # Get a new session.
@@ -215,19 +215,18 @@ class OJMicroline:
             )
 
             if data["ErrorCode"] == 1:
-                raise OJMicrolineAuthException(
-                    "Unable to create session, wrong username, password, API key or customer ID provided."  # noqa: E501
-                )
+                msg = "Unable to create session, wrong username, password, API key or customer ID provided."  # noqa: E501
+                raise OJMicrolineAuthError(msg)
 
             # Reset the number of session calls.
             self.__session_calls_left = self.__session_calls
             self.__session_id = data["SessionId"]
 
     async def get_thermostats(self) -> list[Thermostat]:
-        """
-        Get all the thermostats.
+        """Get all the thermostats.
 
-        Returns:
+        Returns
+        -------
             A list of Thermostats objects.
         """
         await self.login()
@@ -249,14 +248,14 @@ class OJMicroline:
         temperature: int | None = None,
         duration: int = COMFORT_DURATION,
     ) -> bool:
-        """
-        Set the regulation mode.
+        """Set the regulation mode.
 
         Set the provided thermostat to a given preset mode and
         temperature. The input can be a Thermostat model
         or a string containing the serial number.
 
         Args:
+        ----
             resource: The Thermostat model.
             regulation_mode: The mode to set the thermostat to.
             temperature: The temperature to set or None.
@@ -264,10 +263,12 @@ class OJMicroline:
                       for (comfort mode only), defaults to 4 hours.
 
         Returns:
+        -------
             True if it succeeded.
 
         Raises:
-            OJMicrolineException: An error occurred while setting the regulation mode.
+        ------
+            OJMicrolineError: An error occurred while setting the regulation mode.
         """
         if self.__session_id is None:
             await self.login()
@@ -288,7 +289,8 @@ class OJMicroline:
         )
 
         if not self.__api.parse_update_regulation_mode_response(data):
-            raise OJMicrolineException("Unable to set preset mode.")
+            msg = "Unable to set preset mode."
+            raise OJMicrolineError(msg)
 
         return True
 
@@ -299,20 +301,20 @@ class OJMicroline:
             self.__session_id = None
             await self.__http_session.close()
 
-    async def __aenter__(self) -> OJMicroline:
-        """
-        Async enter.
+    async def __aenter__(self) -> Self:
+        """Async enter.
 
-        Returns:
+        Returns
+        -------
             The API object.
         """
         return self
 
-    async def __aexit__(self, *_exc_info: str) -> None:
-        """
-        Async exit.
+    async def __aexit__(self, *_exc_info: object) -> None:
+        """Async exit.
 
         Args:
+        ----
             _exc_info: Exec type.
         """
         await self.close()
