@@ -1,6 +1,7 @@
 # ruff: noqa: S106, E501
 """Asynchronous Python client for OJ Microline Thermostat."""
 import asyncio
+from time import sleep
 
 from ojmicroline_thermostat import WD5API, OJMicroline
 from ojmicroline_thermostat.const import (
@@ -90,28 +91,28 @@ async def main() -> None:
                 print(f"   Last Primary Mode is auto: {resource.last_primary_mode_is_auto}")
                 print("")
 
-                # sleep(5)
-                # print(f"Updating the preset mode for {resource.name}")
-                # print(f"Current: {REGULATION_MODES[resource.regulation_mode]}")
+                sleep(5)
+                print(f"Updating the preset mode for {resource.name}")
+                print(f"Current: {REGULATION_MODES[resource.regulation_mode]}")
 
                 print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
                 await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
-                # sleep(5)
+                sleep(5)
 
-                # if REGULATION_BOOST in resource.supported_regulation_modes:
-                #     print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")
-                #     await client.set_regulation_mode(resource, REGULATION_BOOST)
-                #     print("Sleeping for 5 seconds..")
-                #     sleep(5)
+                if REGULATION_BOOST in resource.supported_regulation_modes:
+                    print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")
+                    await client.set_regulation_mode(resource, REGULATION_BOOST)
+                    print("Sleeping for 5 seconds..")
+                    sleep(5)
 
-                # print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
-                # await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
-                # print("Sleeping for 5 seconds..")
+                print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
+                await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
+                print("Sleeping for 5 seconds..")
 
-                # print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")
-                # await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
-                # print("Sleeping for 5 seconds..")
-                # sleep(5)
+                print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")
+                await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
+                print("Sleeping for 5 seconds..")
+                sleep(5)
             # fmt: on
 
 
