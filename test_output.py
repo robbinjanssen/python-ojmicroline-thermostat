@@ -50,70 +50,70 @@ async def main() -> None:
         # fmt: off
         thermostats = await client.get_thermostats()
         for resource in thermostats:
-            if resource.name == "Woonkamer":
-                print("####################")
-                print(f"# {resource.name}")
-                print("####################")
-                print("- Details:")
-                print(f"   ID: {resource.thermostat_id}")
-                print(f"   Model: {resource.model}")
-                print(f"   Serial Number: {resource.serial_number}")
-                print(f"   Software Version: {resource.software_version}")
-                print(f"   Zone: {resource.zone_name} ({resource.zone_id})")
-                if resource.sensor_mode is not None:
-                    print(f"   Sensor mode: {SENSOR_MODES[resource.sensor_mode]}")
-                print("- Regulation:")
-                print(f"   Mode: {REGULATION_MODES[resource.regulation_mode]}")
-                print(f"   Temperature: {resource.get_current_temperature()}")
-                print(f"   Target temperature: {resource.get_target_temperature()}")
-                print("- Temperatures:")
-                print(f"   Current: {resource.get_current_temperature()}")
-                print(f"   Target: {resource.get_target_temperature()}")
-                print(f"   Range: {resource.min_temperature} - {resource.max_temperature}")
-                print("- Dates:")
-                print(f"   Comfort End: {resource.comfort_end_time.strftime(DATETIME_FORMAT)}")
-                if resource.boost_end_time is not None:
-                    print(f"   Boost End: {resource.boost_end_time.strftime(DATETIME_FORMAT)}")
-                if resource.vacation_begin_time is not None:
-                    print(f"   Vacation Begin: {resource.vacation_begin_time.strftime(DATETIME_FORMAT)}")
-                if resource.vacation_end_time is not None:
-                    print(f"   Vacation End: {resource.vacation_end_time.strftime(DATETIME_FORMAT)}")
-                print("- Status:")
-                print(f"   Online: {resource.online}")
-                print(f"   Heating: {resource.heating}")
-                print(f"   Adaptive Mode: {resource.adaptive_mode}")
-                if resource.vacation_mode is not None:
-                    print(f"   Vacation Mode: {resource.vacation_mode}")
-                if resource.open_window_detection is not None:
-                    print(f"   Open Window Detection: {resource.open_window_detection}")
-                if resource.daylight_saving_active is not None:
-                    print(f"   Daylight Saving: {resource.daylight_saving_active}")
-                print(f"   Last Primary Mode is auto: {resource.last_primary_mode_is_auto}")
-                print("")
+            print("####################")
+            print(f"# {resource.name}")
+            print("####################")
+            print("- Details:")
+            print(f"   ID: {resource.thermostat_id}")
+            print(f"   Model: {resource.model}")
+            print(f"   Serial Number: {resource.serial_number}")
+            print(f"   Software Version: {resource.software_version}")
+            print(f"   Zone: {resource.zone_name} ({resource.zone_id})")
+            if resource.sensor_mode is not None:
+                print(f"   Sensor mode: {SENSOR_MODES[resource.sensor_mode]}")
+            print("- Regulation:")
+            print(f"   Mode: {REGULATION_MODES[resource.regulation_mode]}")
+            print(f"   Temperature: {resource.get_current_temperature()}")
+            print(f"   Target temperature: {resource.get_target_temperature()}")
+            print("- Temperatures:")
+            print(f"   Current: {resource.get_current_temperature()}")
+            print(f"   Target: {resource.get_target_temperature()}")
+            print(f"   Range: {resource.min_temperature} - {resource.max_temperature}")
+            print("- Dates:")
+            print(f"   Comfort End: {resource.comfort_end_time.strftime(DATETIME_FORMAT)}")
+            if resource.boost_end_time is not None:
+                print(f"   Boost End: {resource.boost_end_time.strftime(DATETIME_FORMAT)}")
+            if resource.vacation_begin_time is not None:
+                print(f"   Vacation Begin: {resource.vacation_begin_time.strftime(DATETIME_FORMAT)}")
+            if resource.vacation_end_time is not None:
+                print(f"   Vacation End: {resource.vacation_end_time.strftime(DATETIME_FORMAT)}")
+            print("- Status:")
+            print(f"   Online: {resource.online}")
+            print(f"   Heating: {resource.heating}")
+            print(f"   Adaptive Mode: {resource.adaptive_mode}")
+            if resource.vacation_mode is not None:
+                print(f"   Vacation Mode: {resource.vacation_mode}")
+            if resource.open_window_detection is not None:
+                print(f"   Open Window Detection: {resource.open_window_detection}")
+            if resource.daylight_saving_active is not None:
+                print(f"   Daylight Saving: {resource.daylight_saving_active}")
+            print(f"   Last Primary Mode is auto: {resource.last_primary_mode_is_auto}")
+            print("")
 
-                sleep(5)
-                print(f"Updating the preset mode for {resource.name}")
-                print(f"Current: {REGULATION_MODES[resource.regulation_mode]}")
+            sleep(5)
+            print(f"Updating the preset mode for {resource.name}")
+            print(f"Current: {REGULATION_MODES[resource.regulation_mode]}")
 
-                print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
-                await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
-                sleep(5)
+            print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
+            await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
+            print("Sleeping for 5 seconds..")
+            sleep(5)
 
-                if REGULATION_BOOST in resource.supported_regulation_modes:
-                    print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")
-                    await client.set_regulation_mode(resource, REGULATION_BOOST)
-                    print("Sleeping for 5 seconds..")
-                    sleep(5)
-
-                print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
-                await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
-                print("Sleeping for 5 seconds..")
-
-                print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")
-                await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
+            if REGULATION_BOOST in resource.supported_regulation_modes:
+                print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")
+                await client.set_regulation_mode(resource, REGULATION_BOOST)
                 print("Sleeping for 5 seconds..")
                 sleep(5)
-            # fmt: on
+
+            print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
+            await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
+            print("Sleeping for 5 seconds..")
+
+            print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")
+            await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
+            print("Sleeping for 5 seconds..")
+            sleep(5)
+        # fmt: on
 
 
 if __name__ == "__main__":
