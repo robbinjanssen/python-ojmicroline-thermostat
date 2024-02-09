@@ -41,7 +41,6 @@ async def main() -> None:
     """Show example on using the OJ Microline client."""
     async with OJMicroline(
         api=WD5API(
-            host="ocd5.azurewebsites.net",
             customer_id=99,
             api_key="<app-api-key>",
             username="<your-username>",
