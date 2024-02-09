@@ -43,9 +43,9 @@ async def main() -> None:
         api=WD5API(
             host="ocd5.azurewebsites.net",
             customer_id=99,
-            api_key="f219aab4-9ac0-4343-8422-b72203e2fac9",
-            username="robbinjanssen",
-            password="2K4f2YMMZdggd4EZ",
+            api_key="<app-api-key>",
+            username="<your-username>",
+            password="<your-password>",
         ),
     ) as client:
         # fmt: off
