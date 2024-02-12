@@ -42,6 +42,7 @@ class WD5API(OJMicrolineAPI):
             password: The password for the username.
             client_sw_version: The client software version.
             host: The host name used for API requests.
+
         """
         self.api_key = api_key
         self.customer_id = customer_id

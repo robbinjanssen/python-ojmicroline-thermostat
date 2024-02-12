@@ -21,6 +21,7 @@ class ScheduleEvent:
         ----
             date: The date of the event.
             temperature: The temperature of the event.
+
         """
         self.date = date
         self.temperature = temperature
@@ -43,6 +44,7 @@ class Schedule:
         Returns:
         -------
             A Schedule Object.
+
         """
         result = {}
         now = datetime.now(tz=UTC)
@@ -94,6 +96,7 @@ class Schedule:
         Returns
         -------
             The currently active temperature based on the schedule.
+
         """
         now = datetime.now(tz=UTC)
         current_day = now.weekday()
@@ -121,6 +124,7 @@ class Schedule:
         Returns
         -------
             The lowest temperature based on the schedule.
+
         """
         temperature = None
         for day in self.days.values():
