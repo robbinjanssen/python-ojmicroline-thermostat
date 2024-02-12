@@ -64,7 +64,7 @@ class WG4API(OJMicrolineAPI):
 
     def update_regulation_mode_body(  # noqa: D102
         self,
-        thermostat: Thermostat,  # noqa: ARG002
+        thermostat: Thermostat,
         regulation_mode: int,
         temperature: int | None,
         duration: int,
@@ -83,6 +83,7 @@ class WG4API(OJMicrolineAPI):
 
         return {
             "RegulationMode": regulation_mode,
+            "VacationEnabled": thermostat.vacation_mode,
             **extras,
         }
 

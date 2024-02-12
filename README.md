@@ -51,6 +51,10 @@ This object represents the current state of a thermostat.
 | `manual_temperature` | integer | If the regulation mode is set to manual mode, the thermostat will target this temperature. |
 | `comfort_temperature` | integer | If the regulation mode is set to comfort mode, the thermostat will target this temperature. |
 | `comfort_end_time` | datetime | If the regulation mode is set to comfort mode, it will end at this time. |
+| `vacation_mode` | boolean | If true then the thermostat is set to `vacation_temperature` from `vacation_begin_time` to `vacation_end_time`. If false, then no vacation is in progress or scheduled. |
+| `vacation_temperature` | integer | If the regulation mode is VACATION, the thermostat will target this temperature. |
+| `vacation_begin_time` | datetime | The vacation regulation mode will begin at this time. Note that vacations may be scheduled to begin in the future. |
+| `vacation_end_time` | datetime | If in vacation mode, the thermostat will return to schedule mode at this time. |
 | `last_primary_mode_is_auto` | boolean | Unknown |
 
 These fields are only available on WD5-series thermostats; for others, they may be `None`:
@@ -59,7 +63,6 @@ These fields are only available on WD5-series thermostats; for others, they may 
 | :------- | :--- | :---------- |
 | `thermostat_id` | int | The unique identifier for this thermostat. |
 | `adaptive_mode` | boolean | If on then then the thermostat automatically changes heating start times to ensure that the required temperature has been reached at the beginning of any specific event. |
-| `vacation_mode` | boolean | If on then the thermostat regulates the heating of your home to a minimum while you are away on holiday, thus saving energy and money. |
 | `open_window_detection` | boolean | If on then the thermostat shuts off the heating for 30 minutes if an open window is detected. |
 | `daylight_saving_active` | boolean | If on, the "Daylight Saving Time" function of the thermostat will automatically adjust the clock to the daylight saving time for the "Region" chosen. |
 | `sensor_mode` | integer | The currently set sensor mode of the thermostat, see below. |
@@ -67,9 +70,6 @@ These fields are only available on WD5-series thermostats; for others, they may 
 | `temperature_room` | integer | The temperature measured by the room sensor. |
 | `boost_temperature` | integer | If the regulation mode is set to boost mode, the thermostat will target this temperature. |
 | `boost_end_time` | datetime | If the regulation mode is set to boost mode, it will end at this time. |
-| `vacation_temperature` | integer | If the regulation mode is set to vacation mode, the thermostat will target this temperature. |
-| `vacation_begin_time` | datetime | Vacation mode will be set to on when this date time passes. |
-| `vacation_end_time` | datetime | Vacation mode will be set to off when this date time passes. |
 | `frost_protection_temperature` | integer | If the regulation mode is set to frost protection mode, the thermostat will target this temperature. |
 | `schedule` | Schedule | The schedule the thermostat currently uses. (This *could* be supported by WG4-series thermostats, it simply isn't implemented.) |
 
