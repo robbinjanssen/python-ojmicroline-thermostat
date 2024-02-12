@@ -1,7 +1,6 @@
 """Asynchronous Python client communicating with the OJ Microline API."""
 from __future__ import annotations
 
-import asyncio
 import json
 import socket
 from dataclasses import dataclass
@@ -54,6 +53,7 @@ class OJMicrolineAPI(Protocol):
         Args:
         ----
             data: The JSON data contained in the response.
+
         """
 
     update_regulation_mode_path: str
@@ -65,6 +65,7 @@ class OJMicrolineAPI(Protocol):
         Args:
         ----
             thermostat: The Thermostat model.
+
         """
 
     def update_regulation_mode_body(
@@ -85,6 +86,7 @@ class OJMicrolineAPI(Protocol):
                       for (comfort mode only).
 
         Returns: A dict with values to be used in an HTTP POST body.
+
         """
 
     def parse_update_regulation_mode_response(self, data: Any) -> bool:
@@ -95,6 +97,7 @@ class OJMicrolineAPI(Protocol):
             data: The JSON data contained in the response.
 
         Returns: True if the update succeeded.
+
         """
 
 
@@ -126,6 +129,7 @@ class OJMicroline:
         ----
             api: An object that specifies how to interact with the API.
             session: The session to use, or a new session will be created.
+
         """
         self.__api = api
         self.__http_session = session
@@ -157,6 +161,7 @@ class OJMicroline:
             OJMicrolineTimeoutError: A timeout occurred.
             OJMicrolineConnectionError: An error occurred.
             OJMicrolineError: Received an unexpected response from the API.
+
         """
         try:
             if self.__http_session is None:
@@ -182,7 +187,7 @@ class OJMicroline:
                     ssl=True,
                 )
                 response.raise_for_status()
-        except asyncio.TimeoutError as exception:
+        except TimeoutError as exception:
             msg = "Timeout occurred while connecting to the OJ Microline API."
             raise OJMicrolineTimeoutError(msg) from exception
         except (ClientError, socket.gaierror) as exception:
@@ -205,6 +210,7 @@ class OJMicroline:
         Raises
         ------
             OJMicrolineAuthError: An error occurred while authenticating.
+
         """
         if self.__session_calls_left == 0 or self.__session_id is None:
             # Get a new session.
@@ -228,6 +234,7 @@ class OJMicroline:
         Returns
         -------
             A list of Thermostats objects.
+
         """
         await self.login()
 
@@ -269,6 +276,7 @@ class OJMicroline:
         Raises:
         ------
             OJMicrolineError: An error occurred while setting the regulation mode.
+
         """
         if self.__session_id is None:
             await self.login()
@@ -307,6 +315,7 @@ class OJMicroline:
         Returns
         -------
             The API object.
+
         """
         return self
 
@@ -316,5 +325,6 @@ class OJMicroline:
         Args:
         ----
             _exc_info: Exec type.
+
         """
         await self.close()

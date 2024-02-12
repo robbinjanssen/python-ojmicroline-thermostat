@@ -26,6 +26,7 @@ class WG4API(OJMicrolineAPI):
             username: The username to log in with.
             password: The password for the username.
             host: The host name used for API requests.
+
         """
         self.username = username
         self.password = password

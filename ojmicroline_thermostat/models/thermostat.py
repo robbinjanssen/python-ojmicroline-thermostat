@@ -79,6 +79,7 @@ class Thermostat:
         Returns:
         -------
             A Thermostat Object.
+
         """
         time_zone = data["TimeZone"]
         return cls(
@@ -140,6 +141,7 @@ class Thermostat:
         Returns:
         -------
             A Thermostat Object.
+
         """
         return cls(
             # Technically this could be a UWG4 or AWG4:
@@ -173,6 +175,7 @@ class Thermostat:
         Returns
         -------
             The current temperature.
+
         """
         # The WG4 API makes this easy:
         if self.set_point_temperature is not None:
@@ -205,6 +208,7 @@ class Thermostat:
         Returns
         -------
             The current temperature.
+
         """
         # Once again, this is easy with the WG4 API:
         if self.temperature is not None:
@@ -233,6 +237,7 @@ def parse_wd5_date(value: str, offset: int) -> datetime:
     Returns:
     -------
         The parsed datetime.
+
     """
     timezone = strftime("%H:%M", gmtime(abs(offset)))
     separator = "+" if offset >= 0 else "-"
@@ -259,6 +264,7 @@ def parse_wg4_date(value: str) -> datetime:
     Returns:
     -------
         The parsed datetime.
+
     """
     value = "+".join(value.split("+")[:2]).strip()
 
