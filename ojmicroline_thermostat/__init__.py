@@ -1,11 +1,11 @@
 """Asynchronous Python client controlling an OJ Microline Thermostat."""
 
 from .exceptions import (
-    OJMicrolineAuthException,
-    OJMicrolineConnectionException,
-    OJMicrolineException,
-    OJMicrolineResultsException,
-    OJMicrolineTimeoutException,
+    OJMicrolineAuthError,
+    OJMicrolineConnectionError,
+    OJMicrolineError,
+    OJMicrolineResultsError,
+    OJMicrolineTimeoutError,
 )
 from .models import Thermostat
 from .ojmicroline import OJMicroline
@@ -15,11 +15,11 @@ from .wg4 import WG4API
 __all__ = [
     "Thermostat",
     "OJMicroline",
-    "OJMicrolineException",
-    "OJMicrolineAuthException",
-    "OJMicrolineConnectionException",
-    "OJMicrolineResultsException",
-    "OJMicrolineTimeoutException",
+    "OJMicrolineError",
+    "OJMicrolineAuthError",
+    "OJMicrolineConnectionError",
+    "OJMicrolineResultsError",
+    "OJMicrolineTimeoutError",
     "WD5API",
     "WG4API",
 ]

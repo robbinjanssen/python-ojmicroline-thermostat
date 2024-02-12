@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 
@@ -15,10 +15,10 @@ class ScheduleEvent:
     temperature: int
 
     def __init__(self, date: datetime, temperature: int) -> None:
-        """
-        Create a new ScheduleEvent instance.
+        """Create a new ScheduleEvent instance.
 
         Args:
+        ----
             date: The date of the event.
             temperature: The temperature of the event.
         """
@@ -34,18 +34,18 @@ class Schedule:
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> Schedule:
-        """
-        Return a new Schedule instance based on the given JSON.
+        """Return a new Schedule instance based on the given JSON.
 
         Args:
+        ----
             data: The JSON data from the API.
 
         Returns:
+        -------
             A Schedule Object.
         """
-
         result = {}
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         current_day = now.weekday()
         for item in data["Days"]:
             # Define the week days.
@@ -85,17 +85,17 @@ class Schedule:
         return cls(days=result)
 
     def get_active_temperature(self) -> int:
-        """
-        Get the current active temperature.
+        """Get the current active temperature.
 
         Returns the currently active temperature based on the
         schedule. It parses the schedule and compares the
         schedule times with the current date time.
 
-        Returns:
+        Returns
+        -------
             The currently active temperature based on the schedule.
         """
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         current_day = now.weekday()
 
         temperature = 0
@@ -107,25 +107,23 @@ class Schedule:
         if temperature != 0:
             return temperature
 
-        if current_day == 0:
-            prev_day = 6
-        else:
-            prev_day = current_day - 1
+        # Define the prev day.
+        prev_day = 6 if current_day == 0 else current_day - 1
 
         return self.days[prev_day][-1].temperature
 
     def get_lowest_temperature(self) -> int:
-        """
-        Get the lowest temperature.
+        """Get the lowest temperature.
 
         Returns the lowest temperature based on the
         schedule. It is used for eco mode.
 
-        Returns:
+        Returns
+        -------
             The lowest temperature based on the schedule.
         """
         temperature = None
-        for _, day in self.days.items():
+        for day in self.days.values():
             for event in day:
                 if temperature is None or temperature > event.temperature:
                     temperature = event.temperature

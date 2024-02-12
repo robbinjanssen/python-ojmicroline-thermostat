@@ -1,7 +1,8 @@
-# pylint: disable=redefined-outer-name,too-many-statements
+# ruff: noqa: S106, E501, PLR0915
+# pylint: disable=too-many-statements
 """Asynchronous Python client for OJ Microline Thermostat."""
 import asyncio
-from time import sleep
+from asyncio import sleep
 
 from ojmicroline_thermostat import WD5API, OJMicroline
 from ojmicroline_thermostat.const import (
@@ -33,12 +34,12 @@ SENSOR_MODES = {
     SENSOR_ROOM_FLOOR: "Room/Floor",
 }
 
-DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S"
+DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
 
 async def main() -> None:
     """Show example on using the OJ Microline client."""
-    async with OJMicroline(  # noqa: S106
+    async with OJMicroline(
         api=WD5API(
             customer_id=99,
             api_key="<app-api-key>",
@@ -69,13 +70,13 @@ async def main() -> None:
             print(f"   Target: {resource.get_target_temperature()}")
             print(f"   Range: {resource.min_temperature} - {resource.max_temperature}")
             print("- Dates:")
-            print(f"   Comfort End: {resource.comfort_end_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
+            print(f"   Comfort End: {resource.comfort_end_time.strftime(DATETIME_FORMAT)}")
             if resource.boost_end_time is not None:
                 print(f"   Boost End: {resource.boost_end_time.strftime(DATETIME_FORMAT)}")
             if resource.vacation_begin_time is not None:
-                print(f"   Vacation Begin: {resource.vacation_begin_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
+                print(f"   Vacation Begin: {resource.vacation_begin_time.strftime(DATETIME_FORMAT)}")
             if resource.vacation_end_time is not None:
-                print(f"   Vacation End: {resource.vacation_end_time.strftime(DATETIME_FORMAT)}")  # noqa: E501
+                print(f"   Vacation End: {resource.vacation_end_time.strftime(DATETIME_FORMAT)}")
             print("- Status:")
             print(f"   Online: {resource.online}")
             print(f"   Heating: {resource.heating}")
@@ -89,29 +90,30 @@ async def main() -> None:
             print(f"   Last Primary Mode is auto: {resource.last_primary_mode_is_auto}")
             print("")
 
-            sleep(5)
+            await sleep(5)
             print(f"Updating the preset mode for {resource.name}")
             print(f"Current: {REGULATION_MODES[resource.regulation_mode]}")
 
-            print(f"- Setting to {REGULATION_MODES[REGULATION_MANUAL]} and temperature 2500")  # noqa: E501
-            await client.set_regulation_mode(resource, REGULATION_MANUAL, 2500)
-            print("Sleeping for 5 seconds..")
-            sleep(5)
-
-            if REGULATION_BOOST in resource.supported_regulation_modes:
-                print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")  # noqa: E501
-                await client.set_regulation_mode(resource, REGULATION_BOOST)
-                print("Sleeping for 5 seconds..")
-                sleep(5)
-
-            print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")  # noqa: E501
+            print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
             await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
             print("Sleeping for 5 seconds..")
+            await sleep(5)
 
-            print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")  # noqa: E501
+            if REGULATION_BOOST in resource.supported_regulation_modes:
+                print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")
+                await client.set_regulation_mode(resource, REGULATION_BOOST)
+                print("Sleeping for 5 seconds..")
+                await sleep(5)
+
+            print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
+            await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
+            print("Sleeping for 5 seconds..")
+            await sleep(5)
+
+            print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")
             await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
             print("Sleeping for 5 seconds..")
-            sleep(5)
+            await sleep(5)
         # fmt: on
 
 

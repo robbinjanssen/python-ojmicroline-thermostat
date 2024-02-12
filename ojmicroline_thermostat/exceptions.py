@@ -1,21 +1,21 @@
 """Asynchronous Python client controlling an OJ Microline Thermostat."""
 
 
-class OJMicrolineException(Exception):
+class OJMicrolineError(Exception):
     """Generic API exception."""
 
 
-class OJMicrolineAuthException(OJMicrolineException):
+class OJMicrolineAuthError(OJMicrolineError):
     """API authentication/authorization exception."""
 
 
-class OJMicrolineConnectionException(OJMicrolineException):
+class OJMicrolineConnectionError(OJMicrolineError):
     """API connection exception."""
 
 
-class OJMicrolineResultsException(OJMicrolineException):
+class OJMicrolineResultsError(OJMicrolineError):
     """API results exception."""
 
 
-class OJMicrolineTimeoutException(OJMicrolineException):
+class OJMicrolineTimeoutError(OJMicrolineError):
     """API request timed out."""

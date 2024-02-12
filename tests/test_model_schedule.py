@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 from freezegun import freeze_time
-
 from ojmicroline_thermostat.models import Schedule
 
 from . import load_fixtures
@@ -20,7 +19,7 @@ async def test_schedule_from_json() -> None:
     schedule = Schedule.from_json(data)
 
     assert schedule.days is not None
-    for _, day in schedule.days.items():
+    for day in schedule.days.values():
         assert isinstance(day, Sequence)
         for event in day:
             assert event.temperature is not None
@@ -63,8 +62,7 @@ async def test_schedule_get_active_temperaturea() -> None:
 @pytest.mark.asyncio
 @freeze_time("2023-01-04 06:00")
 async def test_schedule_get_active_temperature_use_event_from_prev_day() -> None:
-    """
-    Use event from prev day when time is before first event.
+    """Use event from prev day when time is before first event.
 
     WeekDayGrpNo 2 = Tuesday and WeekDayGrpNo 3 = Wednesday
 
@@ -90,8 +88,7 @@ async def test_schedule_get_active_temperature_use_event_from_prev_day() -> None
 @pytest.mark.asyncio
 @freeze_time("2023-01-02 06:00")
 async def test_schedule_get_active_temperature_use_event_from_sunday() -> None:
-    """
-    Use sunday when monday and before first event.
+    """Use sunday when monday and before first event.
 
     WeekDayGrpNo 0 = Sunday and WeekDayGrpNo 1 = Monday
 

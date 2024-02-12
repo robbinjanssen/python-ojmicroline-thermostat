@@ -16,12 +16,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.1.1
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: python
+        uses: github/codeql-action/init@v3.24.0
 
       - name: Perform Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v3.24.0

@@ -7,12 +7,11 @@ from unittest.mock import patch
 import aiohttp
 import pytest
 from aresponses import Response, ResponsesMockServer  # type: ignore[import]
-
 from ojmicroline_thermostat import (
     WG4API,
     OJMicroline,
-    OJMicrolineAuthException,
-    OJMicrolineException,
+    OJMicrolineAuthError,
+    OJMicrolineError,
     Thermostat,
 )
 from ojmicroline_thermostat.const import (
@@ -51,7 +50,7 @@ async def test_login(aresponses: ResponsesMockServer) -> None:
         assert (
             client._OJMicroline__session_calls_left
             == client._OJMicroline__session_calls
-        )  # noqa: E501
+        )
         assert client._OJMicroline__session_id == "f00br4"
 
 
@@ -78,7 +77,7 @@ async def test_login_failed(aresponses: ResponsesMockServer) -> None:
             session=session,
         )
 
-        with pytest.raises(OJMicrolineAuthException):
+        with pytest.raises(OJMicrolineAuthError):
             await client.login()
 
         assert client._OJMicroline__session_calls_left == -1
@@ -197,7 +196,6 @@ async def test_set_regulation_mode_failed(
     monkeypatch, aresponses: ResponsesMockServer
 ) -> None:
     """Test update the regulation mode when an error occurs."""
-
     aresponses.add(
         "ojmicroline.test.host",
         "/api/thermostat",
@@ -224,7 +222,7 @@ async def test_set_regulation_mode_failed(
         monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)
         monkeypatch.setattr(client, "_OJMicroline__session_id", "f00b4r")
 
-        with pytest.raises(OJMicrolineException):
+        with pytest.raises(OJMicrolineError):
             await client.set_regulation_mode(thermostat, REGULATION_COMFORT, 2500, 360)
 
         assert client._OJMicroline__session_calls_left == 299

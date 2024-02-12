@@ -5,7 +5,6 @@ from datetime import datetime
 
 import pytest
 from freezegun import freeze_time
-
 from ojmicroline_thermostat.const import (
     REGULATION_BOOST,
     REGULATION_COMFORT,
@@ -190,6 +189,16 @@ async def test_thermostat_from_json_wg4() -> None:
     # Test the getter methods:
     assert thermostat.get_current_temperature() == 2200
     assert thermostat.get_target_temperature() == 2600
+
+
+@pytest.mark.asyncio
+async def test_thermostat_from_json_wd5_timezone_negative() -> None:
+    """Make sure a negative timezone is set when TimeZone is negative."""
+    data = json.loads(load_fixtures("wd5_thermostat.json"))
+    data["TimeZone"] = -7200
+
+    thermostat = Thermostat.from_wd5_json(data)
+    assert thermostat.comfort_end_time.strftime("%z") == "-0200"
 
 
 REQUIRED_FIELDS = [
