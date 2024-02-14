@@ -1,7 +1,7 @@
 """Test the Thermostat model for WD5-series APIs."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from freezegun import freeze_time
@@ -176,6 +176,7 @@ async def test_thermostat_from_json_wg4() -> None:
         REGULATION_SCHEDULE,
         REGULATION_COMFORT,
         REGULATION_MANUAL,
+        REGULATION_VACATION,
     ]
     assert thermostat.last_primary_mode_is_auto is False
     assert thermostat.min_temperature == 500
@@ -185,6 +186,11 @@ async def test_thermostat_from_json_wg4() -> None:
     assert isinstance(thermostat.comfort_end_time, datetime)
     assert thermostat.comfort_temperature == 2000
     assert thermostat.manual_temperature == 2600
+    assert thermostat.vacation_mode is True
+    assert thermostat.vacation_temperature == 600
+    tzinfo = timezone(-timedelta(hours=6))
+    assert thermostat.vacation_begin_time == datetime(2024, 2, 12, tzinfo=tzinfo)
+    assert thermostat.vacation_end_time == datetime(2024, 2, 16, tzinfo=tzinfo)
 
     # Test the getter methods:
     assert thermostat.get_current_temperature() == 2200
@@ -218,6 +224,10 @@ REQUIRED_FIELDS = [
     "manual_temperature",
     "comfort_end_time",
     "last_primary_mode_is_auto",
+    "vacation_mode",
+    "vacation_begin_time",
+    "vacation_end_time",
+    "vacation_temperature",
 ]
 
 WG4_ONLY_FIELDS = [
@@ -235,10 +245,6 @@ WD5_ONLY_FIELDS = [
     "temperature_floor",
     "temperature_room",
     "boost_end_time",
-    "vacation_mode",
-    "vacation_begin_time",
-    "vacation_end_time",
-    "vacation_temperature",
     "frost_protection_temperature",
     "boost_temperature",
 ]

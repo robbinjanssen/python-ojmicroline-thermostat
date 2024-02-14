@@ -129,9 +129,6 @@ class Thermostat:
     def from_wg4_json(cls, data: dict[str, Any]) -> Thermostat:
         """Return a new Thermostat instance based on JSON from the WG4-series API.
 
-        The WG4 API does return vacation-related fields but does not actually
-        implement any sort of vacation mode, so those fields are ignored.
-
         The WG4 API does return schedule data but it is currently ignored.
 
         Args:
@@ -143,6 +140,7 @@ class Thermostat:
             A Thermostat Object.
 
         """
+        tz_offset = data["TZOffset"]
         return cls(
             # Technically this could be a UWG4 or AWG4:
             model="UWG4",
@@ -158,6 +156,7 @@ class Thermostat:
                 REGULATION_SCHEDULE,
                 REGULATION_COMFORT,
                 REGULATION_MANUAL,
+                REGULATION_VACATION,
             ],
             last_primary_mode_is_auto=data["LastPrimaryModeIsAuto"],
             temperature=data["Temperature"],
@@ -167,6 +166,14 @@ class Thermostat:
             comfort_temperature=data["ComfortTemperature"],
             manual_temperature=data["ManualTemperature"],
             comfort_end_time=parse_wg4_date(data["ComfortEndTime"]),
+            vacation_mode=data["VacationEnabled"],
+            # Most dates in the WG4 API are specified as UTC (+00:00) but
+            # vacation begin & end are specified in local time with no offset.
+            vacation_begin_time=parse_wg4_date(
+                data["VacationBeginDay"] + " " + tz_offset
+            ),
+            vacation_end_time=parse_wg4_date(data["VacationEndDay"] + " " + tz_offset),
+            vacation_temperature=data["VacationTemperature"],
         )
 
     def get_target_temperature(self) -> int:
