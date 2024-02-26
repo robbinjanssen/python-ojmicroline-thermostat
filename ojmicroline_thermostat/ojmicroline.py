@@ -1,14 +1,15 @@
 """Asynchronous Python client communicating with the OJ Microline API."""
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any
 
 import async_timeout
 from aiohttp import ClientError, ClientSession, hdrs
-from typing_extensions import Protocol
+from typing_extensions import Protocol, Self
 from yarl import URL
 
 from .const import COMFORT_DURATION
@@ -187,7 +188,7 @@ class OJMicroline:
                     ssl=True,
                 )
                 response.raise_for_status()
-        except TimeoutError as exception:
+        except asyncio.TimeoutError as exception:
             msg = "Timeout occurred while connecting to the OJ Microline API."
             raise OJMicrolineTimeoutError(msg) from exception
         except (ClientError, socket.gaierror) as exception:

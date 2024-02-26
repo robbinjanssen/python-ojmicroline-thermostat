@@ -1,5 +1,7 @@
 """Test the update method for a WD5-series thermostat."""
 
+from __future__ import annotations
+
 import json
 from datetime import datetime, timedelta
 

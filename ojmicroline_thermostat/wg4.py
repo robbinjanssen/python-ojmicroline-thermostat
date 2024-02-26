@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .const import REGULATION_COMFORT, REGULATION_MANUAL
@@ -75,7 +75,7 @@ class WG4API(OJMicrolineAPI):
                 "ManualTemperature": temperature,
             }
         elif regulation_mode == REGULATION_COMFORT:
-            end = datetime.now(tz=UTC) + timedelta(minutes=duration)
+            end = datetime.now(tz=timezone.utc) + timedelta(minutes=duration)
             extras = {
                 "ComfortTemperature": temperature,
                 "ComfortEndTime": end.strftime("%d/%m/%Y %H:%M:00 +00:00"),

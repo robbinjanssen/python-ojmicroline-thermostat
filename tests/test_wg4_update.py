@@ -1,7 +1,7 @@
 """Test the update method for a WD5-series thermostat."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from freezegun import freeze_time
@@ -28,7 +28,7 @@ async def test_update_regulation_mode_comfort() -> None:
     thermostat = Thermostat.from_wg4_json(json.loads(data))
 
     # Check the current times.
-    assert thermostat.comfort_end_time == datetime(2024, 1, 24, 5, tzinfo=UTC)
+    assert thermostat.comfort_end_time == datetime(2024, 1, 24, 5, tzinfo=timezone.utc)
 
     # Check the current temperature for comfort.
     assert thermostat.comfort_temperature == 2000
@@ -47,7 +47,7 @@ async def test_update_regulation_mode_comfort() -> None:
     # Assert comfort end time is the current date + COMFORT_DURATION minutes.
     assert datetime.strptime(  # noqa: DTZ007
         result["ComfortEndTime"], WG4_DATETIME_FORMAT
-    ) == datetime.now(tz=UTC) + timedelta(minutes=COMFORT_DURATION)
+    ) == datetime.now(tz=timezone.utc) + timedelta(minutes=COMFORT_DURATION)
 
 
 @pytest.mark.asyncio
@@ -61,7 +61,7 @@ async def test_update_regulation_mode_comfort_with_temp_and_duration() -> None:
     thermostat = Thermostat.from_wg4_json(json.loads(data))
 
     # Check the current times.
-    assert thermostat.comfort_end_time == datetime(2024, 1, 24, 5, tzinfo=UTC)
+    assert thermostat.comfort_end_time == datetime(2024, 1, 24, 5, tzinfo=timezone.utc)
 
     # Check the current temperature for comfort.
     assert thermostat.comfort_temperature == 2000
@@ -80,7 +80,7 @@ async def test_update_regulation_mode_comfort_with_temp_and_duration() -> None:
     # Assert comfort end time is the current date + 360 minutes.
     assert datetime.strptime(  # noqa: DTZ007
         result["ComfortEndTime"], WG4_DATETIME_FORMAT
-    ) == datetime.now(tz=UTC) + timedelta(minutes=360)
+    ) == datetime.now(tz=timezone.utc) + timedelta(minutes=360)
 
     # Assert the temperature is the same.
     assert result["ComfortTemperature"] == 2350
@@ -97,7 +97,7 @@ async def test_update_regulation_mode_with_temp() -> None:
     thermostat = Thermostat.from_wg4_json(json.loads(data))
 
     # Check the current times.
-    assert thermostat.comfort_end_time == datetime(2024, 1, 24, 5, tzinfo=UTC)
+    assert thermostat.comfort_end_time == datetime(2024, 1, 24, 5, tzinfo=timezone.utc)
 
     # Check the current temperature for manual.
     assert thermostat.manual_temperature == 2600
