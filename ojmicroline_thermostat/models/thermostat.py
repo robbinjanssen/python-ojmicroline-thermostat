@@ -1,6 +1,7 @@
 # ruff: noqa: PLR0911
 # pylint: disable=too-many-instance-attributes,too-many-return-statements
 """Thermostat model for OJ Microline Thermostat."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

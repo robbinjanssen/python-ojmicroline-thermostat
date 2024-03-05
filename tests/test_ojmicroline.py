@@ -1,6 +1,7 @@
 # pylint: disable=protected-access
 # mypy: disable-error-code=attr-defined
 """Test the main OJMicroline class internals."""
+
 import asyncio
 import json
 from unittest.mock import patch
