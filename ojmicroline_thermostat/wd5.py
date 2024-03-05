@@ -1,6 +1,7 @@
 # ruff: noqa: PLR0913, PERF401
 # pylint: disable=too-many-arguments
 """Implementation of OJMicrolineAPI for WD5-series thermostats."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

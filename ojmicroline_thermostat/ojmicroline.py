@@ -1,4 +1,5 @@
 """Asynchronous Python client communicating with the OJ Microline API."""
+
 from __future__ import annotations
 
 import asyncio

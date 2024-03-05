@@ -1,6 +1,7 @@
 # pylint: disable=protected-access
 # mypy: disable-error-code=attr-defined
 """Integration test for the WG4API class."""
+
 import json
 from unittest.mock import patch
 
