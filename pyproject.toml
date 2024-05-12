@@ -52,7 +52,7 @@ yamllint = "1.35.1"
 pytz = "2024.1"
 types-pytz = "^2024.1.0.20240203"
 async-timeout = "4.0.3"
-freezegun = "1.5.0"
+freezegun = "1.5.1"
 
 [tool.coverage.run]
 plugins = ["covdefaults"]
