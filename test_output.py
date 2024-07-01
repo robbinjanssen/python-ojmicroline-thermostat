@@ -89,7 +89,7 @@ async def main() -> None:
             if resource.daylight_saving_active is not None:
                 print(f"   Daylight Saving: {resource.daylight_saving_active}")
             print(f"   Last Primary Mode is auto: {resource.last_primary_mode_is_auto}")
-            print("")
+            print()
 
             await sleep(5)
             print(f"Updating the preset mode for {resource.name}")
