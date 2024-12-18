@@ -4,6 +4,6 @@ from .schedule import Schedule
 from .thermostat import Thermostat
 
 __all__ = [
-    "Thermostat",
     "Schedule",
+    "Thermostat",
 ]
