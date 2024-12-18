@@ -1,7 +1,7 @@
 """Test the models."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Sequence  # pylint: disable=import-error
 from typing import Any
 
 import pytest

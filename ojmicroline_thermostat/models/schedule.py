@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 
@@ -47,7 +47,7 @@ class Schedule:
 
         """
         result = {}
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         current_day = now.weekday()
         for item in data["Days"]:
             # Define the week days.
@@ -98,7 +98,7 @@ class Schedule:
             The currently active temperature based on the schedule.
 
         """
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         current_day = now.weekday()
 
         temperature = 0

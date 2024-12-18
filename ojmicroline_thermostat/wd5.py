@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .const import (
@@ -97,7 +97,7 @@ class WD5API(OJMicrolineAPI):
     ) -> dict[str, Any]:
         if regulation_mode == REGULATION_COMFORT:
             comfort_end_time = (
-                datetime.now(tz=timezone.utc) + timedelta(minutes=duration)
+                datetime.now(tz=UTC) + timedelta(minutes=duration)
             ).astimezone()
             comfort_temperature = temperature or thermostat.comfort_temperature
         else:
@@ -106,7 +106,7 @@ class WD5API(OJMicrolineAPI):
 
         if regulation_mode == REGULATION_BOOST:
             boost_end_time: datetime | None = (
-                datetime.now(tz=timezone.utc) + timedelta(hours=1)
+                datetime.now(tz=UTC) + timedelta(hours=1)
             ).astimezone()
         else:
             boost_end_time = thermostat.boost_end_time
