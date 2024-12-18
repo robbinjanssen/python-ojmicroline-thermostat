@@ -13,6 +13,8 @@ from .wd5 import WD5API
 from .wg4 import WG4API
 
 __all__ = [
+    "WD5API",
+    "WG4API",
     "OJMicroline",
     "OJMicrolineAuthError",
     "OJMicrolineConnectionError",
@@ -20,6 +22,4 @@ __all__ = [
     "OJMicrolineResultsError",
     "OJMicrolineTimeoutError",
     "Thermostat",
-    "WD5API",
-    "WG4API",
 ]
