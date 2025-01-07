@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import json
 import socket
 from dataclasses import dataclass
@@ -53,6 +54,29 @@ class OJMicrolineAPI(Protocol):
         Args:
         ----
             data: The JSON data contained in the response.
+
+        """
+
+    get_energy_usage_path: str
+    """HTTP path used to fetch energy usage data."""
+
+    def get_energy_usage_params(self, thermostat: Thermostat) -> dict[str, Any]:
+        """Compute additional query string params for fetching energy usage.
+
+        Args:
+        ----
+            thermostat: The Thermostat model.
+
+        """
+
+    def parse_energy_usage_response(self, data: Any) -> dict[str, Any]:
+        """Parse an HTTP response containing energy usage data.
+
+        Args:
+        ----
+            data: The JSON data contained in the response.
+
+        Returns: A dictionary with the energy usage.
 
         """
 
@@ -246,7 +270,57 @@ class OJMicroline:
                 **self.__api.get_thermostats_params(),
             },
         )
-        return self.__api.parse_thermostats_response(data)
+        thermostats = self.__api.parse_thermostats_response(data)
+
+        # add energy data to each thermostat
+        for thermostat in thermostats:
+            energy_usage = await self.get_energy_usage(thermostat)
+            thermostat.energy_current = energy_usage['energy_current']
+            thermostat.energy_yesterday = energy_usage['energy_yesterday']
+
+        return thermostats
+
+    async def get_energy_usage(self, resource: Thermostat) -> dict[str, Any]:
+        """Get the energy usage.
+
+        Get the energy usage for the provided thermostat. The input
+        can be a Thermostat model or a string containing the serial number.
+
+        Args:
+        ----
+            resource: The Thermostat model.
+
+        Returns:
+        -------
+            A dictionary with the energy usage.
+
+        Raises:
+        ------
+            OJMicrolineError: An error occurred while fetching the energy usage.
+
+        """
+        if self.__session_id is None:
+            await self.login()
+
+        date_tomorrow = (datetime.now() + timedelta(days=1)
+                         ).strftime("%Y-%m-%d")
+
+        data = await self._request(
+            self.__api.get_energy_usage_path,
+            method=hdrs.METH_POST,
+            params={
+                "sessionid": self.__session_id,
+            },
+            body={
+                **self.__api.get_thermostats_params(),
+                "ThermostatID": resource.serial_number,
+                "ViewType": 2,
+                "DateTime": date_tomorrow,
+                "History": 0
+            }
+        )
+
+        return self.__api.parse_energy_usage_response(data)
 
     async def set_regulation_mode(
         self,

@@ -64,6 +64,8 @@ class Thermostat:
     vacation_temperature: int | None = None
     frost_protection_temperature: int | None = None
     boost_temperature: int | None = None
+    energy_current: float | None = None
+    energy_yesterday: float | None = None
 
     # WG4-only fields:
     temperature: int | None = None

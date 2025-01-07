@@ -5,6 +5,7 @@
 import asyncio
 from asyncio import sleep
 
+from config import config
 from ojmicroline_thermostat import WD5API, OJMicroline
 from ojmicroline_thermostat.const import (
     REGULATION_BOOST,
@@ -42,10 +43,10 @@ async def main() -> None:
     """Show example on using the OJ Microline client."""
     async with OJMicroline(
         api=WD5API(
-            customer_id=99,
-            api_key="<app-api-key>",
-            username="<your-username>",
-            password="<your-password>",
+            customer_id=config['customer_id'],
+            api_key=config['api_key'],
+            username=config['username'],
+            password=config['password'],
         ),
     ) as client:
         # fmt: off
@@ -70,6 +71,9 @@ async def main() -> None:
             print(f"   Current: {resource.get_current_temperature()}")
             print(f"   Target: {resource.get_target_temperature()}")
             print(f"   Range: {resource.min_temperature} - {resource.max_temperature}")
+            print("- Energy:")
+            print(f"   Energy current: {resource.energy_current}")
+            print(f"   Energy yesterday: {resource.energy_yesterday}")
             print("- Dates:")
             print(f"   Comfort End: {resource.comfort_end_time.strftime(DATETIME_FORMAT)}")
             if resource.boost_end_time is not None:
