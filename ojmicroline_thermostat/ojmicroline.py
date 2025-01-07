@@ -274,9 +274,7 @@ class OJMicroline:
 
         # add energy data to each thermostat
         for thermostat in thermostats:
-            energy_usage = await self.get_energy_usage(thermostat)
-            thermostat.energy_current = energy_usage['energy_current']
-            thermostat.energy_yesterday = energy_usage['energy_yesterday']
+            thermostat.energy = await self.get_energy_usage(thermostat)
 
         return thermostats
 

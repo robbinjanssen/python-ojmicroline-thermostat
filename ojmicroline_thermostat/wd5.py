@@ -87,10 +87,8 @@ class WD5API(OJMicrolineAPI):
             msg = "Unable to get energy usage via API."
             raise OJMicrolineResultsError(msg, {"data": data})
 
-        energy = dict(
-            energy_current=data["EnergyUsage"][0]["Usage"][0]['EnergyKWattHour'],
-            energy_yesterday=data["EnergyUsage"][0]["Usage"][1]['EnergyKWattHour'],
-        )
+        energy = [d['EnergyKWattHour']
+                  for d in data["EnergyUsage"][0]["Usage"]]
         return energy
 
     update_regulation_mode_path: str = "api/Group/UpdateGroup"

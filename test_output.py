@@ -72,8 +72,8 @@ async def main() -> None:
             print(f"   Target: {resource.get_target_temperature()}")
             print(f"   Range: {resource.min_temperature} - {resource.max_temperature}")
             print("- Energy:")
-            print(f"   Energy current: {resource.energy_current}")
-            print(f"   Energy yesterday: {resource.energy_yesterday}")
+            print(f"   Energy current: {resource.get_current_energy()}")
+            print(f"   Energy history: {resource.energy}")
             print("- Dates:")
             print(f"   Comfort End: {resource.comfort_end_time.strftime(DATETIME_FORMAT)}")
             if resource.boost_end_time is not None:

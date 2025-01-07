@@ -64,8 +64,7 @@ class Thermostat:
     vacation_temperature: int | None = None
     frost_protection_temperature: int | None = None
     boost_temperature: int | None = None
-    energy_current: float | None = None
-    energy_yesterday: float | None = None
+    energy: list[float] | None = None
 
     # WG4-only fields:
     temperature: int | None = None
@@ -234,6 +233,19 @@ class Thermostat:
             )
 
         return 0
+
+    def get_current_energy(self) -> float:
+        """Return the current energy usage for the thermostat.
+
+        Returns
+        -------
+            The current energy usage.
+
+        """
+        if self.energy is None:
+            return 0
+
+        return self.energy[0]
 
 
 def parse_wd5_date(value: str, offset: int) -> datetime:
