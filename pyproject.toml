@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ojmicroline-thermostat"
-version = "3.2.0"
+version = "3.2.1"
 description = "Asynchronous Python client controlling an OJ Microline Thermostat."
 authors = ["Robbin Janssen <robbinjanssen@gmail.com>"]
 maintainers = ["Robbin Janssen <robbinjanssen@gmail.com>"]
