@@ -69,14 +69,14 @@ class OJMicrolineAPI(Protocol):
 
         """
 
-    def parse_energy_usage_response(self, data: Any) -> dict[str, Any]:
+    def parse_energy_usage_response(self, data: Any) -> list[float]:
         """Parse an HTTP response containing energy usage data.
 
         Args:
         ----
             data: The JSON data contained in the response.
 
-        Returns: A dictionary with the energy usage.
+        Returns: A list with the energy usage values.
 
         """
 
