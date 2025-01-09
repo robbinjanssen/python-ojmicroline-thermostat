@@ -72,6 +72,7 @@ These fields are only available on WD5-series thermostats; for others, they may 
 | `boost_end_time` | datetime | If the regulation mode is set to boost mode, it will end at this time. |
 | `frost_protection_temperature` | integer | If the regulation mode is set to frost protection mode, the thermostat will target this temperature. |
 | `schedule` | Schedule | The schedule the thermostat currently uses. (This *could* be supported by WG4-series thermostats, it simply isn't implemented.) |
+| `energy` | list | The energy usage in kWh for the current day and the six previous days. (Note that the integrated tariff calculation needs to be disabled.) |
 
 These fields are only available on WG4-series thermostats; for others, they may be `None`:
 
@@ -110,6 +111,7 @@ Keep in mind that certain thermostats only support a subset of these modes; be s
 | `login` | `None` | Create a new session at the OJ Microline API. |
 | `get_thermostats` | `None` | Get all thermostats from the OJ Microline API. |
 | `set_regulation_mode` | `resource: Thermostat`, `regulation_mode: int`, `temperature: int \| None = None`, `duration: int = COMFORT_DURATION` | Set the regulation mode based on the input.<br> - `resource`: An instance of a Thermostat model returned by `get_thermostats()`<br> - `regulation_mode`: An integer representing the regulation mode, see "Regulation modes"<br> - `temperature`: An integer representing the temperature, eg: 2500. Only useful when setting the regulation mode to manual or comfort.<br> - `duration`: The duration in minutes to set the temperature for; only applies to comfort mode. |
+| `get_current_energy` | None | Return the current energy usage in kWh. This is the first value in the `energy` property list. |
 
 ## Usage
 
