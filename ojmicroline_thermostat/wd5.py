@@ -80,6 +80,17 @@ class WD5API(OJMicrolineAPI):
                     results.append(Thermostat.from_wd5_json(item))
         return results
 
+    get_energy_usage_path: str = "api/EnergyUsage/GetEnergyUsage"
+
+    def parse_energy_usage_response(self, data: dict) -> list[dict]:  # noqa: D102
+        if data["ErrorCode"] == 1:
+            msg = "Unable to get energy usage via API."
+            raise OJMicrolineResultsError(msg, {"data": data})
+
+        energy = [d['EnergyKWattHour']
+                  for d in data["EnergyUsage"][0]["Usage"]]
+        return energy
+
     update_regulation_mode_path: str = "api/Group/UpdateGroup"
 
     def update_regulation_mode_params(  # noqa: D102
