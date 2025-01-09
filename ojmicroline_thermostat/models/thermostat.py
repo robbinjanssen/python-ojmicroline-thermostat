@@ -239,13 +239,13 @@ class Thermostat:
 
         Returns
         -------
-            The current energy usage.
+            The current energy usage in kWh.
 
         """
-        if self.energy is None:
-            return 0
-
-        return self.energy[0]
+        if self.energy is not None:
+            return self.energy[0]
+        
+        return 0.0
 
 
 def parse_wd5_date(value: str, offset: int) -> datetime:

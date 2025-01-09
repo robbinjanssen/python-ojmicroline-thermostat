@@ -278,11 +278,10 @@ class OJMicroline:
 
         return thermostats
 
-    async def get_energy_usage(self, resource: Thermostat) -> dict[str, Any]:
+    async def get_energy_usage(self, resource: Thermostat) -> list[float]:
         """Get the energy usage.
 
-        Get the energy usage for the provided thermostat. The input
-        can be a Thermostat model or a string containing the serial number.
+        Get the energy usage for the provided thermostat. 
 
         Args:
         ----
@@ -290,7 +289,7 @@ class OJMicroline:
 
         Returns:
         -------
-            A dictionary with the energy usage.
+            A list with the energy usage for the current day and the six previous days.
 
         Raises:
         ------
