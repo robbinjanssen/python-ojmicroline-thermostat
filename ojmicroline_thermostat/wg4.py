@@ -53,7 +53,13 @@ class WG4API(OJMicrolineAPI):
             for item in group["Thermostats"]:
                 if len(item):
                     results.append(Thermostat.from_wg4_json(item))
+
         return results
+
+    get_energy_usage_path: str = ""
+
+    def parse_energy_usage_response(self, data: Any) -> list[float]:  # noqa: D102,ARG002
+        return []
 
     update_regulation_mode_path: str = "api/thermostat"
 

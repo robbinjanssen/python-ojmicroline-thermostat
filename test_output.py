@@ -1,5 +1,6 @@
 # ruff: noqa: S106, E501, PLR0915
 # pylint: disable=too-many-statements
+# mypy: disable-error-code="arg-type"
 """Asynchronous Python client for OJ Microline Thermostat."""
 
 import asyncio
@@ -43,10 +44,10 @@ async def main() -> None:
     """Show example on using the OJ Microline client."""
     async with OJMicroline(
         api=WD5API(
-            customer_id=config['customer_id'],
-            api_key=config['api_key'],
-            username=config['username'],
-            password=config['password'],
+            customer_id=config["customer_id"],
+            api_key=config["api_key"],
+            username=config["username"],
+            password=config["password"],
         ),
     ) as client:
         # fmt: off

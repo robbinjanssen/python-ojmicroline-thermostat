@@ -99,6 +99,27 @@ async def test_get_thermostats(monkeypatch, aresponses: ResponsesMockServer) -> 
             text=load_fixtures("wd5_group.json"),
         ),
     )
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/EnergyUsage/GetEnergyUsage",
+        "POST",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("energy.json"),
+        ),
+    )
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/EnergyUsage/GetEnergyUsage",
+        "POST",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("energy.json"),
+        ),
+    )
+
     async with aiohttp.ClientSession() as session:
         client = OJMicroline(
             api=WD5API(
