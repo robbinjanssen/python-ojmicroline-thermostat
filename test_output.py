@@ -1,5 +1,5 @@
-# ruff: noqa: S106, E501, PLR0915
-# pylint: disable=too-many-statements
+# ruff: noqa: S106, E501, PLR0915, I001
+# pylint: disable=too-many-statements,import-error
 # mypy: disable-error-code="arg-type"
 """Asynchronous Python client for OJ Microline Thermostat."""
 
