@@ -244,7 +244,7 @@ class Thermostat:
         """
         if self.energy is not None:
             return self.energy[0]
-        
+
         return 0.0
 
 

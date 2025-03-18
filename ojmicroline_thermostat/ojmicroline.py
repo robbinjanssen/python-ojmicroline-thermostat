@@ -1,11 +1,12 @@
+# pylint: disable=assignment-from-no-return
 """Asynchronous Python client communicating with the OJ Microline API."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import json
 import socket
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol, Self
 
 import async_timeout
@@ -59,15 +60,6 @@ class OJMicrolineAPI(Protocol):
 
     get_energy_usage_path: str
     """HTTP path used to fetch energy usage data."""
-
-    def get_energy_usage_params(self, thermostat: Thermostat) -> dict[str, Any]:
-        """Compute additional query string params for fetching energy usage.
-
-        Args:
-        ----
-            thermostat: The Thermostat model.
-
-        """
 
     def parse_energy_usage_response(self, data: Any) -> list[float]:
         """Parse an HTTP response containing energy usage data.
@@ -281,7 +273,7 @@ class OJMicroline:
     async def get_energy_usage(self, resource: Thermostat) -> list[float]:
         """Get the energy usage.
 
-        Get the energy usage for the provided thermostat. 
+        Get the energy usage for the provided thermostat.
 
         Args:
         ----
@@ -299,8 +291,11 @@ class OJMicroline:
         if self.__session_id is None:
             await self.login()
 
-        date_tomorrow = (datetime.now() + timedelta(days=1)
-                         ).strftime("%Y-%m-%d")
+        date_tomorrow = (datetime.now(tz=UTC) + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # If no path is defined, return an empty list.
+        if self.__api.get_energy_usage_path == "":
+            return []
 
         data = await self._request(
             self.__api.get_energy_usage_path,
@@ -313,8 +308,8 @@ class OJMicroline:
                 "ThermostatID": resource.serial_number,
                 "ViewType": 2,
                 "DateTime": date_tomorrow,
-                "History": 0
-            }
+                "History": 0,
+            },
         )
 
         return self.__api.parse_energy_usage_response(data)

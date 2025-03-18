@@ -141,6 +141,7 @@ lint.ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "test_output.py" = ["ERA001", "T201"]
+"config_example.py" = ["D100", "C408", "S106"]
 
 [tool.ruff.lint.flake8-pytest-style]
 mark-parentheses = false
