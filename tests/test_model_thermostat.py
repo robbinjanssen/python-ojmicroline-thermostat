@@ -30,9 +30,9 @@ async def test_thermostat_from_json_wd5() -> None:
     thermostat = Thermostat.from_wd5_json(json.loads(data))
 
     for field in REQUIRED_FIELDS + WD5_ONLY_FIELDS:
-        assert (
-            getattr(thermostat, field) is not None
-        ), f"Expected {field} to be non-null"
+        assert getattr(thermostat, field) is not None, (
+            f"Expected {field} to be non-null"
+        )
     for field in WG4_ONLY_FIELDS:
         assert getattr(thermostat, field) is None, f"Expected {field} to be null"
 
@@ -157,9 +157,9 @@ async def test_thermostat_from_json_wg4() -> None:
     thermostat = Thermostat.from_wg4_json(json.loads(data))
 
     for field in REQUIRED_FIELDS + WG4_ONLY_FIELDS:
-        assert (
-            getattr(thermostat, field) is not None
-        ), f"Expected {field} to be non-null"
+        assert getattr(thermostat, field) is not None, (
+            f"Expected {field} to be non-null"
+        )
     for field in WD5_ONLY_FIELDS:
         assert getattr(thermostat, field) is None, f"Expected {field} to be null"
 

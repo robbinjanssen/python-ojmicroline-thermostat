@@ -25,7 +25,7 @@ def datetime_now() -> datetime:
 
     @link https://github.com/spulec/freezegun/issues/89
     """
-    return datetime.utcnow().replace(tzinfo=pytz.utc).astimezone()  # noqa: DTZ003
+    return datetime.utcnow().replace(tzinfo=pytz.utc).astimezone()
 
 
 @pytest.mark.asyncio
