@@ -9,11 +9,11 @@ from typing import Any
 
 from .const import REGULATION_COMFORT, REGULATION_MANUAL
 from .models import Thermostat
-from .ojmicroline import OJMicrolineAPI
+from .ojmicroline import SessionOJMicrolineAPI
 
 
 @dataclass
-class WG4API(OJMicrolineAPI):
+class WG4API(SessionOJMicrolineAPI):
     """Controls OJ Microline WG4-series thermostats (UWG4, AWG4, etc.)."""
 
     def __init__(

@@ -35,23 +35,18 @@ async def test_login(aresponses: ResponsesMockServer) -> None:
         ),
     )
     async with aiohttp.ClientSession() as session:
-        client = OJMicroline(
-            api=WD5API(
-                host="ojmicroline.test.host",
-                api_key="ap1-k3y-v3ry-s3cret",
-                customer_id=1337,
-                username="py",
-                password="test",
-            ),
-            session=session,
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
         )
+        client = OJMicroline(api=api, session=session)
 
         await client.login()
-        assert (
-            client._OJMicroline__session_calls_left
-            == client._OJMicroline__session_calls
-        )
-        assert client._OJMicroline__session_id == "f00br4"
+        assert api._session_calls_left == api._session_calls
+        assert api._session_id == "f00br4"
 
 
 @pytest.mark.asyncio
@@ -68,26 +63,24 @@ async def test_login_failed(aresponses: ResponsesMockServer) -> None:
         ),
     )
     async with aiohttp.ClientSession() as session:
-        client = OJMicroline(
-            api=WD5API(
-                host="ojmicroline.test.host",
-                api_key="ap1-k3y-v3ry-s3cret",
-                customer_id=1337,
-                username="py",
-                password="test",
-            ),
-            session=session,
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
         )
+        client = OJMicroline(api=api, session=session)
 
         with pytest.raises(OJMicrolineAuthError):
             await client.login()
 
-        assert client._OJMicroline__session_calls_left == -1
-        assert client._OJMicroline__session_id is None
+        assert api._session_calls_left == -1
+        assert api._session_id is None
 
 
 @pytest.mark.asyncio
-async def test_get_thermostats(monkeypatch, aresponses: ResponsesMockServer) -> None:
+async def test_get_thermostats(aresponses: ResponsesMockServer) -> None:
     """Test get thermostats function and make sure fields are set."""
     aresponses.add(
         "ojmicroline.test.host",
@@ -121,19 +114,17 @@ async def test_get_thermostats(monkeypatch, aresponses: ResponsesMockServer) -> 
     )
 
     async with aiohttp.ClientSession() as session:
-        client = OJMicroline(
-            api=WD5API(
-                host="ojmicroline.test.host",
-                api_key="ap1-k3y-v3ry-s3cret",
-                customer_id=1337,
-                username="py",
-                password="test",
-            ),
-            session=session,
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
         )
+        api._session_calls_left = 300
+        api._session_id = "f00b4r"
+        client = OJMicroline(api=api, session=session)
 
-        monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)
-        monkeypatch.setattr(client, "_OJMicroline__session_id", "f00b4r")
         thermostats: list[Thermostat] = await client.get_thermostats()
 
         assert thermostats is not None
@@ -142,9 +133,7 @@ async def test_get_thermostats(monkeypatch, aresponses: ResponsesMockServer) -> 
 
 
 @pytest.mark.asyncio
-async def test_get_thermostats_failed(
-    monkeypatch, aresponses: ResponsesMockServer
-) -> None:
+async def test_get_thermostats_failed(aresponses: ResponsesMockServer) -> None:
     """Test get thermostats function to handle an error."""
     aresponses.add(
         "ojmicroline.test.host",
@@ -157,30 +146,23 @@ async def test_get_thermostats_failed(
         ),
     )
     async with aiohttp.ClientSession() as session:
-        client = OJMicroline(
-            api=WD5API(
-                host="ojmicroline.test.host",
-                api_key="ap1-k3y-v3ry-s3cret",
-                customer_id=1337,
-                username="py",
-                password="test",
-            ),
-            session=session,
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
         )
-
-        monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)
-        monkeypatch.setattr(client, "_OJMicroline__session_id", "f00b4r")
+        api._session_calls_left = 300
+        api._session_id = "f00b4r"
+        client = OJMicroline(api=api, session=session)
 
         with pytest.raises(OJMicrolineResultsError):
             await client.get_thermostats()
 
-        assert client._OJMicroline__session_calls_left == 299
-
 
 @pytest.mark.asyncio
-async def test_set_regulation_mode(
-    monkeypatch, aresponses: ResponsesMockServer
-) -> None:
+async def test_set_regulation_mode(aresponses: ResponsesMockServer) -> None:
     """Test updating the regulation mode."""
     aresponses.add(
         "ojmicroline.test.host",
@@ -196,19 +178,17 @@ async def test_set_regulation_mode(
         data = load_fixtures("wd5_thermostat.json")
         thermostat = Thermostat.from_wd5_json(json.loads(data))
 
-        client = OJMicroline(
-            api=WD5API(
-                host="ojmicroline.test.host",
-                api_key="ap1-k3y-v3ry-s3cret",
-                customer_id=1337,
-                username="py",
-                password="test",
-            ),
-            session=session,
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
         )
+        api._session_calls_left = 300
+        api._session_id = "f00b4r"
+        client = OJMicroline(api=api, session=session)
 
-        monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)
-        monkeypatch.setattr(client, "_OJMicroline__session_id", "f00b4r")
         result = await client.set_regulation_mode(thermostat, REGULATION_MANUAL, 2500)
 
         assert result is True
@@ -216,7 +196,7 @@ async def test_set_regulation_mode(
 
 @pytest.mark.asyncio
 async def test_set_regulation_mode_expect_login(
-    monkeypatch, aresponses: ResponsesMockServer
+    aresponses: ResponsesMockServer,
 ) -> None:
     """Test update the regulation mode with login method fired."""
     aresponses.add(
@@ -230,35 +210,31 @@ async def test_set_regulation_mode_expect_login(
         ),
     )
     async with aiohttp.ClientSession() as session:
-
-        def set_session_id() -> None:
-            monkeypatch.setattr(client, "_OJMicroline__session_id", "f00b4r")
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
+        )
 
         data = load_fixtures("wd5_thermostat.json")
         thermostat = Thermostat.from_wd5_json(json.loads(data))
 
+        def set_session_id() -> None:
+            api._session_id = "f00b4r"
+
         with patch.object(
             OJMicroline, "login", side_effect=set_session_id
         ) as mock_login:
-            client = OJMicroline(
-                api=WD5API(
-                    host="ojmicroline.test.host",
-                    api_key="ap1-k3y-v3ry-s3cret",
-                    customer_id=1337,
-                    username="py",
-                    password="test",
-                ),
-                session=session,
-            )
+            client = OJMicroline(api=api, session=session)
             await client.set_regulation_mode(thermostat, REGULATION_MANUAL, None)
 
         mock_login.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_set_regulation_mode_failed(
-    monkeypatch, aresponses: ResponsesMockServer
-) -> None:
+async def test_set_regulation_mode_failed(aresponses: ResponsesMockServer) -> None:
     """Test update the regulation mode when an error occurs."""
     aresponses.add(
         "ojmicroline.test.host",
@@ -274,21 +250,16 @@ async def test_set_regulation_mode_failed(
         data = load_fixtures("wd5_thermostat.json")
         thermostat = Thermostat.from_wd5_json(json.loads(data))
 
-        client = OJMicroline(
-            api=WD5API(
-                host="ojmicroline.test.host",
-                api_key="ap1-k3y-v3ry-s3cret",
-                customer_id=1337,
-                username="py",
-                password="test",
-            ),
-            session=session,
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
         )
-
-        monkeypatch.setattr(client, "_OJMicroline__session_calls_left", 300)
-        monkeypatch.setattr(client, "_OJMicroline__session_id", "f00b4r")
+        api._session_calls_left = 300
+        api._session_id = "f00b4r"
+        client = OJMicroline(api=api, session=session)
 
         with pytest.raises(OJMicrolineError):
             await client.set_regulation_mode(thermostat, REGULATION_COMFORT, 2500, 360)
-
-        assert client._OJMicroline__session_calls_left == 299

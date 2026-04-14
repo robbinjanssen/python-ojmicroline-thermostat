@@ -207,6 +207,109 @@ async def test_thermostat_from_json_wd5_timezone_negative() -> None:
     assert thermostat.comfort_end_time.strftime("%z") == "-0200"
 
 
+@pytest.mark.asyncio
+async def test_thermostat_from_json_wg5() -> None:
+    """Make sure the data is accepted by the from_wg5_json method."""
+    data = json.loads(load_fixtures("wg5_thermostat_control.json"))
+    thermostat = Thermostat.from_wg5_json(
+        data["data"],
+        building_id="57dc7778-4ed3-4382-9e89-5cf2e0bc0f8a",
+        zone_name="Default",
+    )
+
+    for field in WG5_ONLY_FIELDS:
+        assert getattr(thermostat, field) is not None, (
+            f"Expected {field} to be non-null"
+        )
+    for field in WD5_EXCLUSIVE_FIELDS:
+        assert getattr(thermostat, field) is None, f"Expected {field} to be null"
+
+    assert thermostat.model == "WG5"
+    assert thermostat.serial_number == "2cb3e6c5-8cf8-4e7e-943a-42618c34a506"
+    assert thermostat.software_version == ""
+    assert thermostat.zone_name == "Default"
+    assert thermostat.zone_id == 0
+    assert thermostat.zone_uuid == "ae85d8fc-1b4a-445a-bdf1-05f970fc3da4"
+    assert thermostat.building_id == "57dc7778-4ed3-4382-9e89-5cf2e0bc0f8a"
+    assert thermostat.name == "Bathroom"
+    assert thermostat.online is True
+    assert thermostat.heating is True
+    assert thermostat.regulation_mode == REGULATION_MANUAL
+    assert thermostat.supported_regulation_modes == [
+        REGULATION_SCHEDULE,
+        REGULATION_MANUAL,
+        REGULATION_COMFORT,
+        REGULATION_VACATION,
+        REGULATION_FROST_PROTECTION,
+    ]
+    assert thermostat.min_temperature == 500
+    assert thermostat.max_temperature == 4000
+    assert thermostat.temperature == 1900
+    assert thermostat.set_point_temperature == 2778
+    assert thermostat.manual_temperature == 2778
+    assert thermostat.comfort_temperature == 2778
+    assert thermostat.frost_protection_temperature == 500
+    assert thermostat.sensor_mode == SENSOR_FLOOR
+    assert thermostat.vacation_mode is False
+    assert thermostat.is_in_standby is False
+    assert thermostat.open_window_detection is False
+    assert thermostat.schedule_id == "f9aac20b-4e45-415b-9f56-e53014ee8639"
+    assert thermostat.schedule_name == "Default Schedule"
+
+    # Test the getter methods:
+    assert thermostat.get_current_temperature() == 1900
+    assert thermostat.get_target_temperature() == 2778
+
+
+@pytest.mark.asyncio
+async def test_thermostat_from_json_wg5_standby() -> None:
+    """Make sure standby mode maps to REGULATION_FROST_PROTECTION."""
+    data = json.loads(load_fixtures("wg5_thermostat_control.json"))
+    data["data"]["mode"]["isInStandby"] = True
+
+    thermostat = Thermostat.from_wg5_json(
+        data["data"],
+        building_id="57dc7778-4ed3-4382-9e89-5cf2e0bc0f8a",
+        zone_name="Default",
+    )
+
+    assert thermostat.regulation_mode == REGULATION_FROST_PROTECTION
+    assert thermostat.is_in_standby is True
+
+
+@pytest.mark.asyncio
+async def test_thermostat_from_json_wg5_away() -> None:
+    """Make sure away_active maps to REGULATION_VACATION."""
+    data = json.loads(load_fixtures("wg5_thermostat_control.json"))
+
+    thermostat = Thermostat.from_wg5_json(
+        data["data"],
+        building_id="57dc7778-4ed3-4382-9e89-5cf2e0bc0f8a",
+        zone_name="Default",
+        away_active=True,
+    )
+
+    assert thermostat.regulation_mode == REGULATION_VACATION
+    assert thermostat.vacation_mode is True
+
+
+@pytest.mark.asyncio
+async def test_thermostat_from_json_wg5_schedule() -> None:
+    """Make sure fallbackMode Auto maps to REGULATION_SCHEDULE."""
+    data = json.loads(load_fixtures("wg5_thermostat_control.json"))
+    data["data"]["mode"]["fallbackMode"] = "Auto"
+
+    thermostat = Thermostat.from_wg5_json(
+        data["data"],
+        building_id="57dc7778-4ed3-4382-9e89-5cf2e0bc0f8a",
+        zone_name="Default",
+    )
+
+    assert thermostat.regulation_mode == REGULATION_SCHEDULE
+    assert thermostat.last_primary_mode_is_auto is True
+    assert thermostat.is_in_standby is False
+
+
 REQUIRED_FIELDS = [
     "model",
     "serial_number",
@@ -247,4 +350,29 @@ WD5_ONLY_FIELDS = [
     "boost_end_time",
     "frost_protection_temperature",
     "boost_temperature",
+]
+
+WD5_EXCLUSIVE_FIELDS = [
+    "thermostat_id",
+    "schedule",
+    "adaptive_mode",
+    "daylight_saving_active",
+    "temperature_floor",
+    "temperature_room",
+    "boost_end_time",
+    "boost_temperature",
+]
+
+WG5_ONLY_FIELDS = [
+    "building_id",
+    "zone_uuid",
+    "is_in_standby",
+    "schedule_id",
+    "schedule_name",
+    "temperature",
+    "set_point_temperature",
+    "sensor_mode",
+    "open_window_detection",
+    "frost_protection_temperature",
+    "vacation_mode",
 ]

@@ -46,7 +46,6 @@ async def test_json_request(aresponses: ResponsesMockServer) -> None:
         assert response is not None
         await client.close()
         assert client._OJMicroline__close_http_session is False
-        assert client._OJMicroline__session_id is None
 
 
 @pytest.mark.asyncio

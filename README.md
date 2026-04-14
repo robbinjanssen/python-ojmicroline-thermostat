@@ -20,7 +20,7 @@ Asynchronous Python client for communicating with a OJ Microline Thermostat.
 
 ## About
 
-A Python package to control OJ Microline thermostats. It currently supports the WD5 series (OWD5, MWD5) and WG4 series (UWG4, AWG4).
+A Python package to control OJ Microline thermostats. It currently supports the WD5 series (OWD5, MWD5), WG4 series (UWG4, AWG4), and WG5 series.
 
 ## Installation
 
@@ -63,23 +63,33 @@ These fields are only available on WD5-series thermostats; for others, they may 
 | :------- | :--- | :---------- |
 | `thermostat_id` | int | The unique identifier for this thermostat. |
 | `adaptive_mode` | boolean | If on then then the thermostat automatically changes heating start times to ensure that the required temperature has been reached at the beginning of any specific event. |
-| `open_window_detection` | boolean | If on then the thermostat shuts off the heating for 30 minutes if an open window is detected. |
+| `open_window_detection` | boolean | If on then the thermostat shuts off the heating for 30 minutes if an open window is detected. Also available on WG5-series thermostats. |
 | `daylight_saving_active` | boolean | If on, the "Daylight Saving Time" function of the thermostat will automatically adjust the clock to the daylight saving time for the "Region" chosen. |
-| `sensor_mode` | integer | The currently set sensor mode of the thermostat, see below. |
-| `temperature_floor` | integer | The temperature measured by the floor sensor. |
-| `temperature_room` | integer | The temperature measured by the room sensor. |
+| `sensor_mode` | integer | The currently set sensor mode of the thermostat, see below. Also available on WG5-series thermostats. |
+| `temperature_floor` | integer | The temperature measured by the floor sensor. Also available on WG5-series thermostats. |
+| `temperature_room` | integer | The temperature measured by the room sensor. Also available on WG5-series thermostats. |
 | `boost_temperature` | integer | If the regulation mode is set to boost mode, the thermostat will target this temperature. |
 | `boost_end_time` | datetime | If the regulation mode is set to boost mode, it will end at this time. |
-| `frost_protection_temperature` | integer | If the regulation mode is set to frost protection mode, the thermostat will target this temperature. |
-| `schedule` | Schedule | The schedule the thermostat currently uses. (This *could* be supported by WG4-series thermostats, it simply isn't implemented.) |
+| `frost_protection_temperature` | integer | If the regulation mode is set to frost protection mode, the thermostat will target this temperature. Also available on WG5-series thermostats. |
+| `schedule` | Schedule/dict | The schedule the thermostat currently uses. On WD5 this is a `Schedule` object; on WG5 it is a raw dict from the API. |
 | `energy` | list | The energy usage in kWh for the current day and the six previous days. (Note that the integrated tariff calculation needs to be disabled.) |
 
-These fields are only available on WG4-series thermostats; for others, they may be `None`:
+These fields are available on WG4 and WG5-series thermostats; for others, they may be `None`:
 
 | Variable | Type | Description |
 | :------- | :--- | :---------- |
 | `temperature` | integer | The current temperature; the thermostat uses the room sensor or floor sensor based on its configuration. Avoid using this directly; instead, call the `get_current_temperature()` method which also works for WD5-series thermostats. |
 | `set_point_temperature` | integer | The temperature the thermostat is targeting. Avoid using this directly; instead, call the `get_target_temperature()` method which also works for WD5-series thermostats. |
+
+These fields are only available on WG5-series thermostats; for others, they may be `None`:
+
+| Variable | Type | Description |
+| :------- | :--- | :---------- |
+| `building_id` | string | The building UUID this thermostat belongs to. |
+| `zone_uuid` | string | The zone UUID this thermostat belongs to (WG5 uses UUIDs rather than integer zone IDs). |
+| `is_in_standby` | boolean | Whether the thermostat is in standby (frost protection) mode. |
+| `schedule_id` | string | The UUID of the schedule assigned to this thermostat. |
+| `schedule_name` | string | The name of the schedule assigned to this thermostat. |
 
 #### Regulation modes
 
@@ -114,6 +124,8 @@ Keep in mind that certain thermostats only support a subset of these modes; be s
 | `get_current_energy` | None | Return the current energy usage in kWh. This is the first value in the `energy` property list. |
 
 ## Usage
+
+### WD5 Example
 
 ```python
 import asyncio
@@ -170,6 +182,44 @@ async def main():
             print("Sleeping for 5 seconds..")
             sleep(5)
             print(f"- Setting to schedule")  # noqa: E501
+            await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### WG5 Example
+
+```python
+import asyncio
+
+from ojmicroline_thermostat import OJMicroline, Thermostat
+from ojmicroline_thermostat.wg5 import WG5API
+from ojmicroline_thermostat.const import (
+    REGULATION_MANUAL,
+    REGULATION_SCHEDULE,
+)
+
+
+async def main():
+    """Show example on using the OJMicroline client with a WG5 thermostat."""
+    async with OJMicroline(
+        api=WG5API(
+            username="<your-username>",
+            password="<your-password>",
+        ),
+    ) as client:
+        thermostats: list[Thermostat] = await client.get_thermostats()
+
+        for resource in thermostats:
+            print(f"{resource.name}: {resource.get_current_temperature() / 100}°C")
+            print(f"  Target: {resource.get_target_temperature() / 100}°C")
+
+            # Set to manual mode at 25°C
+            await client.set_regulation_mode(resource, REGULATION_MANUAL, 2500)
+
+            # Set back to schedule
             await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
 
 
