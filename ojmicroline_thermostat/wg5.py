@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -31,12 +30,10 @@ WG5_SCOPES = (
 )
 
 
-@dataclass
 class WG5API:
     """Controls OJ Microline WG5-series thermostats."""
 
     request: RequestFunc
-    client_id: str = "mobile_app_client"
 
     def __init__(
         self,
@@ -59,6 +56,7 @@ class WG5API:
         self.password = password
         self.host = host
         self.identity_host = identity_host
+        self.client_id = "mobile_app_client"
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_expiry: datetime | None = None

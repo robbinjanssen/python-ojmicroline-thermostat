@@ -215,4 +215,4 @@ async def test_parse_energy_usage_response() -> None:
         username="py",
         password="test",
     )
-    assert api.parse_energy_usage_response({}) == []
+    assert not api.parse_energy_usage_response({})

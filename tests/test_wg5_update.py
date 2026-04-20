@@ -3,6 +3,7 @@
 """Test the WG5API update regulation mode methods."""
 
 import json
+from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import pytest
@@ -177,8 +178,6 @@ async def test_set_regulation_mode_unsupported() -> None:
         thermostat = _make_thermostat()
 
         # Set token to avoid login attempt
-        from datetime import UTC, datetime, timedelta
-
         api._access_token = "fake"
         api._token_expiry = datetime.now(tz=UTC) + timedelta(hours=1)
 
