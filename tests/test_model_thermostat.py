@@ -310,6 +310,19 @@ async def test_thermostat_from_json_wg5_schedule() -> None:
     assert thermostat.is_in_standby is False
 
 
+@pytest.mark.asyncio
+async def test_thermostat_get_current_energy_with_data() -> None:
+    """Test get_current_energy returns the first element when energy is set."""
+    data = json.loads(load_fixtures("wd5_thermostat.json"))
+    thermostat = Thermostat.from_wd5_json(data)
+    thermostat.energy = [3.5, 2.1, 1.0]
+
+    assert thermostat.get_current_energy() == 3.5
+
+    thermostat.energy = None
+    assert thermostat.get_current_energy() == 0.0
+
+
 REQUIRED_FIELDS = [
     "model",
     "serial_number",

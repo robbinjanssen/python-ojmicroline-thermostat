@@ -205,3 +205,14 @@ async def test_set_regulation_mode_failed(aresponses: ResponsesMockServer) -> No
 
         with pytest.raises(OJMicrolineError):
             await client.set_regulation_mode(thermostat, REGULATION_COMFORT, 2500, 360)
+
+
+@pytest.mark.asyncio
+async def test_parse_energy_usage_response() -> None:
+    """Test that WG4 energy usage response parser returns an empty list."""
+    api = WG4API(
+        host="ojmicroline.test.host",
+        username="py",
+        password="test",
+    )
+    assert api.parse_energy_usage_response({}) == []

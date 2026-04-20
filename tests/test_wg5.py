@@ -3,6 +3,7 @@
 """Integration test for the WG5API class."""
 
 import json
+from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import pytest
@@ -96,6 +97,41 @@ def _make_api() -> WG5API:
 
 
 @pytest.mark.asyncio
+async def test_login_skips_when_token_valid(aresponses: ResponsesMockServer) -> None:
+    """Test that login is skipped when a valid token exists."""
+    _add_login_response(aresponses)
+    # Only one token response is mocked; a second login call would fail.
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/buildings",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"data": []}),
+        ),
+    )
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/buildings",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"data": []}),
+        ),
+    )
+    async with aiohttp.ClientSession() as session:
+        api = _make_api()
+        client = OJMicroline(api=api, session=session)
+
+        # First call triggers login
+        await client.get_thermostats()
+        # Second call reuses the cached token (line 79)
+        await client.get_thermostats()
+
+
+@pytest.mark.asyncio
 async def test_get_thermostats(aresponses: ResponsesMockServer) -> None:
     """Test fetching thermostats through the buildings->tree->control flow."""
     _add_login_response(aresponses)
@@ -183,6 +219,103 @@ async def test_get_thermostats(aresponses: ResponsesMockServer) -> None:
         assert thermostat.schedule is not None
         assert thermostat.schedule["baseTemperature"] == 23
         assert len(thermostat.schedule["schedules"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_get_thermostats_no_schedule_no_readouts(
+    aresponses: ResponsesMockServer,
+) -> None:
+    """Test fetching thermostats when schedule and readouts are missing."""
+    _add_login_response(aresponses)
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/buildings",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg5_buildings.json"),
+        ),
+    )
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/awaymode/57dc7778-4ed3-4382-9e89-5cf2e0bc0f8a",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"status": {"code": "OK"}}),
+        ),
+    )
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/buildings/57dc7778-4ed3-4382-9e89-5cf2e0bc0f8a/tree",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg5_building_tree.json"),
+        ),
+    )
+    # Control data with no scheduleId
+    control_data = json.loads(load_fixtures("wg5_thermostat_control.json"))
+    control_data["data"]["scheduleData"] = {}
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/thermostats/2cb3e6c5-8cf8-4e7e-943a-42618c34a506/control",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps(control_data),
+        ),
+    )
+    # Detail data with no readout temperatures
+    detail_data = json.loads(load_fixtures("wg5_thermostat_detail.json"))
+    del detail_data["data"]["thermostatReadouts"]["floorTemperature"]
+    del detail_data["data"]["thermostatReadouts"]["roomTemperature"]
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/thermostats/2cb3e6c5-8cf8-4e7e-943a-42618c34a506",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps(detail_data),
+        ),
+    )
+    async with aiohttp.ClientSession() as session:
+        api = _make_api()
+        client = OJMicroline(api=api, session=session)
+
+        thermostats: list[Thermostat] = await client.get_thermostats()
+
+        assert len(thermostats) == 1
+        thermostat = thermostats[0]
+        assert thermostat.schedule is None
+        assert thermostat.temperature_floor is None
+        assert thermostat.temperature_room is None
+
+
+@pytest.mark.asyncio
+async def test_get_energy_usage_no_building_id() -> None:
+    """Test energy usage returns empty list when building_id is missing."""
+    data = json.loads(load_fixtures("wg5_thermostat_control.json"))
+    thermostat = Thermostat.from_wg5_json(
+        data["data"],
+        building_id="",
+        zone_name="Default",
+    )
+
+    async with aiohttp.ClientSession() as session:
+        api = _make_api()
+        client = OJMicroline(api=api, session=session)
+        # No login mock needed; should return before making any request
+        api._access_token = "fake"
+        api._token_expiry = datetime.now(tz=UTC) + timedelta(hours=1)
+
+        energy = await client.get_energy_usage(thermostat)
+        assert energy == []
 
 
 @pytest.mark.asyncio

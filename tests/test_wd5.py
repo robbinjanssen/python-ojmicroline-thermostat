@@ -234,6 +234,38 @@ async def test_set_regulation_mode_expect_login(
 
 
 @pytest.mark.asyncio
+async def test_get_energy_usage_failed(aresponses: ResponsesMockServer) -> None:
+    """Test energy usage when the API returns an error."""
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/EnergyUsage/GetEnergyUsage",
+        "POST",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"ErrorCode": 1}),
+        ),
+    )
+    async with aiohttp.ClientSession() as session:
+        data = load_fixtures("wd5_thermostat.json")
+        thermostat = Thermostat.from_wd5_json(json.loads(data))
+
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
+        )
+        api._session_calls_left = 300
+        api._session_id = "f00b4r"
+        client = OJMicroline(api=api, session=session)
+
+        with pytest.raises(OJMicrolineResultsError):
+            await client.get_energy_usage(thermostat)
+
+
+@pytest.mark.asyncio
 async def test_set_regulation_mode_failed(aresponses: ResponsesMockServer) -> None:
     """Test update the regulation mode when an error occurs."""
     aresponses.add(

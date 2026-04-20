@@ -10,9 +10,11 @@ from aresponses import Response, ResponsesMockServer  # type: ignore[import]
 from freezegun import freeze_time
 from ojmicroline_thermostat import (
     OJMicroline,
+    OJMicrolineError,
     Thermostat,
 )
 from ojmicroline_thermostat.const import (
+    REGULATION_BOOST,
     REGULATION_COMFORT,
     REGULATION_FROST_PROTECTION,
     REGULATION_MANUAL,
@@ -128,6 +130,60 @@ async def test_set_regulation_mode_schedule(aresponses: ResponsesMockServer) -> 
 
         result = await client.set_regulation_mode(thermostat, REGULATION_SCHEDULE)
         assert result is True
+
+
+@pytest.mark.asyncio
+async def test_set_regulation_mode_exits_standby(
+    aresponses: ResponsesMockServer,
+) -> None:
+    """Test that setting manual mode exits standby first."""
+    _add_login_response(aresponses)
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/thermostats/2cb3e6c5-8cf8-4e7e-943a-42618c34a506/standby/False",
+        "PUT",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"data": {"changeTimestamp": "2026-04-14T01:00:00Z"}}),
+        ),
+    )
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/thermostats/2cb3e6c5-8cf8-4e7e-943a-42618c34a506/mode",
+        "PUT",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"data": {"changeTimestamp": "2026-04-14T01:00:00Z"}}),
+        ),
+    )
+    async with aiohttp.ClientSession() as session:
+        api = _make_api()
+        client = OJMicroline(api=api, session=session)
+        thermostat = _make_thermostat()
+        thermostat.is_in_standby = True
+
+        result = await client.set_regulation_mode(thermostat, REGULATION_MANUAL, 2600)
+        assert result is True
+
+
+@pytest.mark.asyncio
+async def test_set_regulation_mode_unsupported() -> None:
+    """Test that an unsupported regulation mode raises OJMicrolineError."""
+    async with aiohttp.ClientSession() as session:
+        api = _make_api()
+        client = OJMicroline(api=api, session=session)
+        thermostat = _make_thermostat()
+
+        # Set token to avoid login attempt
+        from datetime import UTC, datetime, timedelta
+
+        api._access_token = "fake"
+        api._token_expiry = datetime.now(tz=UTC) + timedelta(hours=1)
+
+        with pytest.raises(OJMicrolineError, match="Unsupported regulation mode"):
+            await client.set_regulation_mode(thermostat, REGULATION_BOOST)
 
 
 @pytest.mark.asyncio
