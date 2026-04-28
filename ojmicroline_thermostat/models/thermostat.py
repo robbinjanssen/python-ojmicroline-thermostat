@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from math import ceil
 from time import gmtime, strftime
 from typing import Any
@@ -22,6 +22,7 @@ from ojmicroline_thermostat.const import (
     SENSOR_ROOM,
     SENSOR_ROOM_FLOOR,
     WG4_DATETIME_FORMAT,
+    WG5_SENSOR_MAP,
 )
 
 from .schedule import Schedule
@@ -66,9 +67,16 @@ class Thermostat:
     boost_temperature: int | None = None
     energy: list[float] | None = None
 
-    # WG4-only fields:
+    # WG4/WG5 fields:
     temperature: int | None = None
     set_point_temperature: int | None = None
+
+    # WG5-only fields:
+    building_id: str | None = None
+    zone_uuid: str | None = None
+    is_in_standby: bool | None = None
+    schedule_id: str | None = None
+    schedule_name: str | None = None
 
     @classmethod
     def from_wd5_json(cls, data: dict[str, Any]) -> Thermostat:
@@ -176,6 +184,79 @@ class Thermostat:
             ),
             vacation_end_time=parse_wg4_date(data["VacationEndDay"] + " " + tz_offset),
             vacation_temperature=data["VacationTemperature"],
+        )
+
+    @classmethod
+    def from_wg5_json(
+        cls,
+        data: dict[str, Any],
+        building_id: str,
+        zone_name: str,
+        *,
+        away_active: bool = False,
+    ) -> Thermostat:
+        """Return a new Thermostat instance based on JSON from the WG5-series API.
+
+        Args:
+        ----
+            data: The thermostat control JSON data from the API.
+            building_id: The building UUID this thermostat belongs to.
+            zone_name: The zone name this thermostat belongs to.
+            away_active: Whether away mode is active for the building.
+
+        Returns:
+        -------
+            A Thermostat Object.
+
+        """
+        mode = data["mode"]
+        setpoint_centideg = round(data["setpoint"] * 100)
+
+        if away_active or mode.get("isAwayActive"):
+            regulation_mode = REGULATION_VACATION
+        elif mode["isInStandby"]:
+            regulation_mode = REGULATION_FROST_PROTECTION
+        elif mode.get("fallbackMode") == "Auto":
+            regulation_mode = REGULATION_SCHEDULE
+        else:
+            regulation_mode = REGULATION_MANUAL
+
+        return cls(
+            model="WG5",
+            serial_number=data["id"],
+            software_version="",
+            zone_name=zone_name,
+            zone_id=0,
+            zone_uuid=data["zoneId"],
+            building_id=building_id,
+            name=data["name"],
+            online=data["isOnline"],
+            heating=data["isHeatRelayActive"],
+            regulation_mode=regulation_mode,
+            supported_regulation_modes=[
+                REGULATION_SCHEDULE,
+                REGULATION_MANUAL,
+                REGULATION_COMFORT,
+                REGULATION_VACATION,
+                REGULATION_FROST_PROTECTION,
+            ],
+            min_temperature=round(data["minimumPossibleSetPoint"] * 100),
+            max_temperature=round(data["maximumPossibleSetPoint"] * 100),
+            temperature=round(data["currentTemperature"] * 100),
+            set_point_temperature=setpoint_centideg,
+            manual_temperature=setpoint_centideg,
+            comfort_temperature=setpoint_centideg,
+            comfort_end_time=datetime.min.replace(tzinfo=UTC),
+            last_primary_mode_is_auto=mode.get("fallbackMode") == "Auto",
+            frost_protection_temperature=round(
+                data["frostProtectionTemperature"] * 100
+            ),
+            sensor_mode=WG5_SENSOR_MAP.get(data.get("sensorApplication", "")),
+            open_window_detection=data.get("isOpenWindowDetected", False),
+            vacation_mode=away_active or mode.get("isAwayActive", False),
+            is_in_standby=mode["isInStandby"],
+            schedule_id=data.get("scheduleData", {}).get("scheduleId"),
+            schedule_name=data.get("scheduleData", {}).get("scheduleName"),
         )
 
     def get_target_temperature(self) -> int:
