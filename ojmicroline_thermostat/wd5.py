@@ -17,11 +17,11 @@ from .const import (
 )
 from .exceptions import OJMicrolineResultsError
 from .models import Thermostat
-from .ojmicroline import OJMicrolineAPI
+from .ojmicroline import SessionOJMicrolineAPI
 
 
 @dataclass
-class WD5API(OJMicrolineAPI):
+class WD5API(SessionOJMicrolineAPI):
     """Controls OJ Microline WD5-series thermostats (OWD5, MWD5, etc.)."""
 
     def __init__(

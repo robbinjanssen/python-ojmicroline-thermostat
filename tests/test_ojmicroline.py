@@ -46,21 +46,15 @@ async def test_json_request(aresponses: ResponsesMockServer) -> None:
         assert response is not None
         await client.close()
         assert client._OJMicroline__close_http_session is False
-        assert client._OJMicroline__session_id is None
 
 
 @pytest.mark.asyncio
 async def test_timeout(monkeypatch, aresponses: ResponsesMockServer) -> None:
     """Test request timeout."""
 
-    async def response_handler(_: aiohttp.ClientResponse) -> Response:
+    async def response_handler(_: aiohttp.ClientResponse) -> None:
         # Faking a timeout by sleeping
         await asyncio.sleep(0.2)
-        return Response(
-            status=200,
-            headers={"Content-Type": "application/json"},
-            text=json.dumps({"ErrorCode": 0}),
-        )
 
     aresponses.add("ojmicroline.test.host", "/test", "GET", response_handler)
 
