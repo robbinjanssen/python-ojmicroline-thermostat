@@ -6,7 +6,7 @@
 import asyncio
 
 from config import config
-from ojmicroline_thermostat import OJMicroline, WD5API
+from ojmicroline_thermostat import WD5API, OJMicroline
 from ojmicroline_thermostat.const import (
     REGULATION_BOOST,
     REGULATION_COMFORT,
