@@ -4,7 +4,6 @@
 """Asynchronous Python client for OJ Microline Thermostat."""
 
 import asyncio
-from asyncio import sleep
 
 from config import config
 from ojmicroline_thermostat import WD5API, OJMicroline
@@ -96,30 +95,30 @@ async def main() -> None:
             print(f"   Last Primary Mode is auto: {resource.last_primary_mode_is_auto}")
             print()
 
-            await sleep(5)
+            await asyncio.sleep(5)
             print(f"Updating the preset mode for {resource.name}")
             print(f"Current: {REGULATION_MODES[resource.regulation_mode]}")
 
             print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
             await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
             print("Sleeping for 5 seconds..")
-            await sleep(5)
+            await asyncio.sleep(5)
 
             if REGULATION_BOOST in resource.supported_regulation_modes:
                 print(f"- Setting to {REGULATION_MODES[REGULATION_BOOST]}")
                 await client.set_regulation_mode(resource, REGULATION_BOOST)
                 print("Sleeping for 5 seconds..")
-                await sleep(5)
+                await asyncio.sleep(5)
 
             print(f"- Setting to {REGULATION_MODES[REGULATION_COMFORT]} and temperature 2500")
             await client.set_regulation_mode(resource, REGULATION_COMFORT, 2500)
             print("Sleeping for 5 seconds..")
-            await sleep(5)
+            await asyncio.sleep(5)
 
             print(f"- Setting to {REGULATION_MODES[REGULATION_SCHEDULE]}")
             await client.set_regulation_mode(resource, REGULATION_SCHEDULE)
             print("Sleeping for 5 seconds..")
-            await sleep(5)
+            await asyncio.sleep(5)
         # fmt: on
 
 
