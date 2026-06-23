@@ -216,3 +216,20 @@ async def test_parse_energy_usage_response() -> None:
         password="test",
     )
     assert not api.parse_energy_usage_response({})
+
+
+def test_login_body_default_application() -> None:
+    """The WG4 login body defaults to Application code 2."""
+    api = WG4API(host="ojmicroline.test.host", username="py", password="test")
+    assert api.login_body()["Application"] == 2
+
+
+def test_login_body_custom_application() -> None:
+    """A custom application code (e.g. 4 for Danfoss LX) is sent on login."""
+    api = WG4API(
+        host="lxwifi.danfoss.us",
+        username="py",
+        password="test",
+        application=4,
+    )
+    assert api.login_body()["Application"] == 4

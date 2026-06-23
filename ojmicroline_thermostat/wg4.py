@@ -17,7 +17,11 @@ class WG4API(SessionOJMicrolineAPI):
     """Controls OJ Microline WG4-series thermostats (UWG4, AWG4, etc.)."""
 
     def __init__(
-        self, username: str, password: str, host: str = "mythermostat.info"
+        self,
+        username: str,
+        password: str,
+        host: str = "mythermostat.info",
+        application: int = 2,
     ) -> None:
         """Create a new instance of the API object.
 
@@ -26,17 +30,22 @@ class WG4API(SessionOJMicrolineAPI):
             username: The username to log in with.
             password: The password for the username.
             host: The host name used for API requests.
+            application: The application code sent on login. Defaults to 2.
+                Some white-labelled clouds scope thermostats to a different
+                code (e.g. Danfoss LX on lxwifi.danfoss.us uses 4); with the
+                wrong code the thermostat list is returned empty.
 
         """
         self.username = username
         self.password = password
         self.host = host
+        self.application = application
 
     login_path: str = "api/authenticate/user"
 
     def login_body(self) -> dict[str, Any]:  # noqa: D102
         return {
-            "Application": 2,
+            "Application": self.application,
             "Confirm": "",
             "Email": self.username,
             "Password": self.password,
