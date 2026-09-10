@@ -121,6 +121,7 @@ max-attributes = 20
 
 [tool.pytest.ini_options]
 addopts = "--cov"
+testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [tool.ruff]
