@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from aiohttp import hdrs
+
 from .const import REGULATION_COMFORT, REGULATION_MANUAL
 from .models import Thermostat
 from .ojmicroline import SessionOJMicrolineAPI
@@ -104,3 +106,51 @@ class WG4API(SessionOJMicrolineAPI):
 
     def parse_update_regulation_mode_response(self, data: Any) -> bool:  # noqa: D102
         return data["Success"]
+
+    supports_notifications: bool = True
+
+    notification_path: str = "api/notification"
+
+    # Client-side timeout for a notification request. The server holds the
+    # request open for roughly a minute before answering that nothing
+    # changed, so this must be comfortably longer than that.
+    notification_timeout: float = 120.0
+
+    _subscribed_session_id: str | None = None
+
+    async def get_notifications(self) -> list[Thermostat]:
+        """Wait for the next push notification about a thermostat.
+
+        The WG4 API delivers notifications by long-polling: a request to the
+        notification path blocks until a thermostat changes, or until the
+        server gives up after about a minute and answers with no thermostat.
+        Notifications are queued per session, and only after that session has
+        fetched the thermostat list, so the first call after a (re)login
+        fetches and returns every thermostat to (re)subscribe the session.
+
+        Returns
+        -------
+            A list with the changed thermostat, every thermostat after
+            (re)subscribing, or nothing if no change occurred.
+
+        """
+        if self._subscribed_session_id != self._session_id:
+            thermostats = await self.get_thermostats()
+            self._subscribed_session_id = self._session_id
+            return thermostats
+
+        data = await self.request(
+            self.notification_path,
+            method=hdrs.METH_GET,
+            params={"sessionid": self._session_id},
+            request_timeout=self.notification_timeout,
+        )
+
+        # A timed-out wait is reported as Action 0 with a null Thermostat;
+        # a change is Action 2 with the full thermostat payload.
+        if not data.get("Thermostat"):
+            return []
+
+        thermostat = Thermostat.from_wg4_json(data["Thermostat"])
+        thermostat.energy = await self.get_energy_usage(thermostat)
+        return [thermostat]

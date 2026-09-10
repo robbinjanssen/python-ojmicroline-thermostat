@@ -24,3 +24,8 @@ WG5_SENSOR_MAP: dict[str, int] = {
 
 WG5_MODE_SCHEDULE = 1
 WG5_MODE_HOLD = 2
+
+# Initial and maximum delay in seconds between retries of failed
+# notification requests; the delay doubles after each failure.
+NOTIFICATION_RETRY_DELAY = 1.0
+NOTIFICATION_MAX_RETRY_DELAY = 300.0

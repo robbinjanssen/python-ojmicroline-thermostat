@@ -295,3 +295,18 @@ async def test_set_regulation_mode_failed(aresponses: ResponsesMockServer) -> No
 
         with pytest.raises(OJMicrolineError):
             await client.set_regulation_mode(thermostat, REGULATION_COMFORT, 2500, 360)
+
+
+@pytest.mark.asyncio
+async def test_notifications_unsupported() -> None:
+    """Test that push notifications are reported as unsupported."""
+    api = WD5API(
+        host="ojmicroline.test.host",
+        api_key="ap1-k3y",
+        customer_id=1337,
+        username="py",
+        password="test",
+    )
+    assert api.supports_notifications is False
+    with pytest.raises(OJMicrolineError):
+        await api.get_notifications()

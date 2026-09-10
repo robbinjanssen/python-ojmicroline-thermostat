@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
+import logging
 import socket
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol, Self
 
@@ -14,7 +18,11 @@ import async_timeout
 from aiohttp import ClientError, ClientSession, hdrs
 from yarl import URL
 
-from .const import COMFORT_DURATION
+from .const import (
+    COMFORT_DURATION,
+    NOTIFICATION_MAX_RETRY_DELAY,
+    NOTIFICATION_RETRY_DELAY,
+)
 from .exceptions import (
     OJMicrolineAuthError,
     OJMicrolineConnectionError,
@@ -25,7 +33,14 @@ from .exceptions import (
 if TYPE_CHECKING:
     from .models import Thermostat
 
+_LOGGER = logging.getLogger(__name__)
+
 RequestFunc = Callable[..., Awaitable[Any]]
+
+# Callback invoked with an updated Thermostat. It may be a plain function or
+# a coroutine function; a returned awaitable is awaited before the next
+# notification is dispatched.
+Listener = Callable[["Thermostat"], Any]
 
 
 class OJMicrolineAPI(Protocol):
@@ -42,6 +57,9 @@ class OJMicrolineAPI(Protocol):
 
     request: RequestFunc
     """Callable for making HTTP requests, set by OJMicroline."""
+
+    supports_notifications: bool
+    """Whether get_notifications() is implemented for this API."""
 
     async def login(self) -> None:
         """Perform authentication against the API."""
@@ -76,6 +94,17 @@ class OJMicrolineAPI(Protocol):
 
         """
 
+    async def get_notifications(self) -> list[Thermostat]:
+        """Wait for the next push notification from the API.
+
+        Blocks until the API reports one or more changed thermostats, or until
+        the API's own wait period elapses without changes (returning an empty
+        list). Implementations may return every thermostat, for example when a
+        new session has to be subscribed first.
+
+        Raises OJMicrolineError when supports_notifications is False.
+        """
+
 
 class SessionOJMicrolineAPI:
     """Base class for session-based OJ Microline APIs (WD5, WG4).
@@ -98,6 +127,8 @@ class SessionOJMicrolineAPI:
     _session_id: str | None = None
     _session_calls_left: int = 0
     _session_calls: int = 300
+
+    supports_notifications: bool = False
 
     def login_body(self) -> dict[str, Any]:
         """Compute HTTP body parameters used when posting to the login path."""
@@ -232,6 +263,11 @@ class SessionOJMicrolineAPI:
 
         return True
 
+    async def get_notifications(self) -> list[Thermostat]:
+        """Wait for the next push notification; not supported by default."""
+        msg = "The API does not support push notifications."
+        raise OJMicrolineError(msg)
+
 
 @dataclass
 class OJMicroline:
@@ -242,6 +278,8 @@ class OJMicroline:
     __request_timeout: float = 30.0
     __http_session: ClientSession | None = None
     __close_http_session: bool = False
+    __listeners: list[Listener] = field(default_factory=list)
+    __notification_task: asyncio.Task[None] | None = None
 
     def __init__(
         self, api: OJMicrolineAPI, session: ClientSession | None = None
@@ -257,8 +295,10 @@ class OJMicroline:
         self.__api = api
         self.__api.request = self._request
         self.__http_session = session
+        self.__listeners = []
+        self.__notification_task = None
 
-    async def _request(  # pylint: disable=too-many-arguments
+    async def _request(  # noqa: PLR0913  # pylint: disable=too-many-arguments
         self,
         uri: str,
         *,
@@ -266,6 +306,7 @@ class OJMicroline:
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        request_timeout: float | None = None,
     ) -> Any:
         """Handle a request to the OJ Microline API.
 
@@ -276,6 +317,7 @@ class OJMicroline:
             params: Extra options to improve or limit the response.
             body: Data can be used in a POST and PATCH request.
             headers: Additional HTTP headers to include.
+            request_timeout: Timeout in seconds, overriding the default.
 
         Returns:
         -------
@@ -305,7 +347,10 @@ class OJMicroline:
             if headers:
                 request_headers.update(headers)
 
-            async with async_timeout.timeout(self.__request_timeout):
+            if request_timeout is None:
+                request_timeout = self.__request_timeout
+
+            async with async_timeout.timeout(request_timeout):
                 response = await self.__http_session.request(
                     method,
                     url,
@@ -409,8 +454,90 @@ class OJMicroline:
             resource, regulation_mode, temperature, duration
         )
 
+    def subscribe(self, listener: Listener) -> Callable[[], None]:
+        """Subscribe to push notifications about thermostat changes.
+
+        The listener is called with an updated Thermostat whenever the API
+        reports a change. The first subscription starts a background task
+        that waits for notifications; it stops when the last subscription is
+        removed or the client is closed. Failed requests are retried with an
+        increasing delay. Must be called from within a running event loop.
+
+        Args:
+        ----
+            listener: A function or coroutine function accepting a Thermostat.
+
+        Returns:
+        -------
+            A function that removes the subscription.
+
+        Raises:
+        ------
+            OJMicrolineError: The API does not support push notifications.
+
+        """
+        if not self.__api.supports_notifications:
+            msg = "The API does not support push notifications."
+            raise OJMicrolineError(msg)
+
+        self.__listeners.append(listener)
+        if self.__notification_task is None:
+            self.__notification_task = asyncio.create_task(self._notification_loop())
+
+        def unsubscribe() -> None:
+            if listener in self.__listeners:
+                self.__listeners.remove(listener)
+            if not self.__listeners:
+                self._stop_notifications()
+
+        return unsubscribe
+
+    def _stop_notifications(self) -> asyncio.Task[None] | None:
+        """Cancel the notification task, returning it so it can be awaited."""
+        task = self.__notification_task
+        self.__notification_task = None
+        if task is not None:
+            task.cancel()
+        return task
+
+    async def _notification_loop(self) -> None:
+        """Wait for notifications and dispatch them to listeners, forever."""
+        delay = NOTIFICATION_RETRY_DELAY
+        while True:
+            try:
+                await self.login()
+                thermostats = await self.__api.get_notifications()
+            except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+                _LOGGER.warning(
+                    "Waiting for notifications failed, retrying in %.0f seconds",
+                    delay,
+                    exc_info=True,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, NOTIFICATION_MAX_RETRY_DELAY)
+                continue
+
+            delay = NOTIFICATION_RETRY_DELAY
+            for thermostat in thermostats:
+                await self._notify_listeners(thermostat)
+
+    async def _notify_listeners(self, thermostat: Thermostat) -> None:
+        """Call every listener with the thermostat, isolating failures."""
+        for listener in list(self.__listeners):
+            try:
+                result = listener(thermostat)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:  # pylint: disable=broad-exception-caught
+                _LOGGER.exception("Error in notification listener")
+
     async def close(self) -> None:
-        """Close open client session."""
+        """Close open client session and stop waiting for notifications."""
+        task = self._stop_notifications()
+        if task is not None:
+            with suppress(asyncio.CancelledError):
+                await task
+
         if self.__http_session and self.__close_http_session:
             self.__close_http_session = False
             await self.__http_session.close()

@@ -233,3 +233,90 @@ def test_login_body_custom_application() -> None:
         application=4,
     )
     assert api.login_body()["Application"] == 4
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_subscribes_new_session(
+    aresponses: ResponsesMockServer,
+) -> None:
+    """Test that a session is subscribed by fetching thermostats first."""
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/thermostats",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg4_group.json"),
+        ),
+    )
+    async with aiohttp.ClientSession() as session:
+        api = WG4API(
+            host="ojmicroline.test.host",
+            username="py",
+            password="test",
+        )
+        api._session_id = "f00b4r"
+        OJMicroline(api=api, session=session)
+
+        assert api.supports_notifications is True
+        thermostats = await api.get_notifications()
+
+        assert len(thermostats) > 0
+        assert api._subscribed_session_id == "f00b4r"
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_update(aresponses: ResponsesMockServer) -> None:
+    """Test that a notification is parsed into a thermostat."""
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/notification",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg4_notification.json"),
+        ),
+    )
+    async with aiohttp.ClientSession() as session:
+        api = WG4API(
+            host="ojmicroline.test.host",
+            username="py",
+            password="test",
+        )
+        api._session_id = "f00b4r"
+        api._subscribed_session_id = "f00b4r"
+        OJMicroline(api=api, session=session)
+
+        thermostats = await api.get_notifications()
+
+        assert len(thermostats) == 1
+        assert thermostats[0].serial_number == "42424242"
+        assert thermostats[0].energy == []
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_no_change(aresponses: ResponsesMockServer) -> None:
+    """Test that a timed-out wait yields no thermostats."""
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/notification",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"SequenceNr": 3, "Action": 0, "Thermostat": None}),
+        ),
+    )
+    async with aiohttp.ClientSession() as session:
+        api = WG4API(
+            host="ojmicroline.test.host",
+            username="py",
+            password="test",
+        )
+        api._session_id = "f00b4r"
+        api._subscribed_session_id = "f00b4r"
+        OJMicroline(api=api, session=session)
+
+        assert await api.get_notifications() == []
