@@ -322,6 +322,10 @@ async def test_thermostat_get_current_energy_with_data() -> None:
     thermostat.energy = None
     assert thermostat.get_current_energy() == 0.0
 
+    # An empty list (e.g. WG4, or WG5 without a building) must not raise.
+    thermostat.energy = []
+    assert thermostat.get_current_energy() == 0.0
+
 
 REQUIRED_FIELDS = [
     "model",
