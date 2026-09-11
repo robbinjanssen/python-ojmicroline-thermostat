@@ -323,7 +323,7 @@ class Thermostat:
             The current energy usage in kWh.
 
         """
-        if self.energy is not None:
+        if self.energy:
             return self.energy[0]
 
         return 0.0
