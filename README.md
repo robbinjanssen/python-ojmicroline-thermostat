@@ -359,7 +359,7 @@ SOFTWARE.
 [issues-url]: https://github.com/robbinjanssen/python-ojmicroline-thermostat/issues
 [license-shield]: https://img.shields.io/github/license/robbinjanssen/python-ojmicroline-thermostat.svg
 [last-commit-shield]: https://img.shields.io/github/last-commit/robbinjanssen/python-ojmicroline-thermostat.svg
-[maintenance-shield]: https://img.shields.io/maintenance/yes/2024.svg
+[maintenance-shield]: https://img.shields.io/maintenance/yes/2026.svg
 [maintainability-shield]: https://api.codeclimate.com/v1/badges/d77f7409eb02e331261b/maintainability
 [maintainability-url]: https://codeclimate.com/github/robbinjanssen/python-ojmicroline-thermostat/maintainability
 [project-stage-shield]: https://img.shields.io/badge/project%20stage-experimental-yellow.svg
