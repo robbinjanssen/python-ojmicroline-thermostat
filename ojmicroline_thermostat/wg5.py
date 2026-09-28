@@ -35,6 +35,8 @@ class WG5API:
 
     request: RequestFunc
 
+    supports_notifications: bool = False
+
     def __init__(
         self,
         username: str,
@@ -289,3 +291,8 @@ class WG5API:
             body=body,
         )
         return True
+
+    async def get_notifications(self) -> list[Thermostat]:
+        """Wait for the next push notification; not supported by WG5."""
+        msg = "The WG5 API does not support push notifications."
+        raise OJMicrolineError(msg)

@@ -11,6 +11,7 @@ from aresponses import Response, ResponsesMockServer  # type: ignore[import]
 from ojmicroline_thermostat import (
     OJMicroline,
     OJMicrolineAuthError,
+    OJMicrolineError,
     Thermostat,
 )
 from ojmicroline_thermostat.const import REGULATION_MANUAL
@@ -345,3 +346,16 @@ async def test_get_energy_usage(aresponses: ResponsesMockServer) -> None:
 
         energy = await client.get_energy_usage(thermostat)
         assert energy == [150.0, 200.0, 0.0]
+
+
+@pytest.mark.asyncio
+async def test_notifications_unsupported() -> None:
+    """Test that push notifications are reported as unsupported."""
+    api = WG5API(
+        host="ojmicroline.test.host",
+        username="py",
+        password="test",
+    )
+    assert api.supports_notifications is False
+    with pytest.raises(OJMicrolineError):
+        await api.get_notifications()

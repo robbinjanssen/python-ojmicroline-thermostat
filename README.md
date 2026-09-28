@@ -227,6 +227,45 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+### Push notifications (WG4)
+
+WG4-series thermostats can report changes as they happen, instead of being
+polled. Subscribe a listener and the client keeps a background task waiting
+for notifications from the API, retrying with an increasing delay if the
+connection fails. The listener may be a plain function or a coroutine
+function. Use `OJMicrolineAPI.supports_notifications` to check whether the
+API in use supports this; `subscribe()` raises `OJMicrolineError` otherwise.
+
+```python
+import asyncio
+
+from ojmicroline_thermostat import OJMicroline, Thermostat, WG4API
+
+
+def on_update(thermostat: Thermostat) -> None:
+    print(f"{thermostat.name}: {thermostat.get_current_temperature() / 100}°C")
+
+
+async def main():
+    async with OJMicroline(
+        api=WG4API(username="<your-username>", password="<your-password>"),
+    ) as client:
+        unsubscribe = client.subscribe(on_update)
+        await asyncio.sleep(600)
+        unsubscribe()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+The WG4 API delivers notifications through long-polling, so a change made on
+the thermostat or through the app usually reaches the listener within a few
+seconds, and periodic temperature reports arrive roughly every minute per
+thermostat. Notifications are queued per session, so the listener receives
+every thermostat once when the subscription starts and again whenever the
+client has to log in again.
+
 ## Contributing
 
 This is an active open-source project. We are always open to people who want to
