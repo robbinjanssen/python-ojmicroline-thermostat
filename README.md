@@ -72,7 +72,7 @@ These fields are only available on WD5-series thermostats; for others, they may 
 | `boost_end_time` | datetime | If the regulation mode is set to boost mode, it will end at this time. |
 | `frost_protection_temperature` | integer | If the regulation mode is set to frost protection mode, the thermostat will target this temperature. Also available on WG5-series thermostats. |
 | `schedule` | Schedule/dict | The schedule the thermostat currently uses. On WD5 this is a `Schedule` object; on WG5 it is a raw dict from the API. |
-| `energy` | list | The energy usage in kWh for the current day and the six previous days. (Note that the integrated tariff calculation needs to be disabled.) |
+| `energy` | list | The energy usage in kWh for the current day and the six previous days. (Note that the integrated tariff calculation needs to be disabled.) Also available on WG4-series thermostats. |
 
 These fields are available on WG4 and WG5-series thermostats; for others, they may be `None`:
 
@@ -80,6 +80,13 @@ These fields are available on WG4 and WG5-series thermostats; for others, they m
 | :------- | :--- | :---------- |
 | `temperature` | integer | The current temperature; the thermostat uses the room sensor or floor sensor based on its configuration. Avoid using this directly; instead, call the `get_current_temperature()` method which also works for WD5-series thermostats. |
 | `set_point_temperature` | integer | The temperature the thermostat is targeting. Avoid using this directly; instead, call the `get_target_temperature()` method which also works for WD5-series thermostats. |
+
+These fields are only available on WG4-series thermostats; for others, they may be `None`:
+
+| Variable | Type | Description |
+| :------- | :--- | :---------- |
+| `utc_offset` | timedelta | The offset of the thermostat's time zone from UTC. |
+| `load_watts` | integer | The load of the heating element in W, either measured by the thermostat or set manually during installation. Avoid using this directly; instead, call the `get_current_power()` method. |
 
 These fields are only available on WG5-series thermostats; for others, they may be `None`:
 
@@ -122,6 +129,7 @@ Keep in mind that certain thermostats only support a subset of these modes; be s
 | `get_thermostats` | `None` | Get all thermostats from the OJ Microline API. |
 | `set_regulation_mode` | `resource: Thermostat`, `regulation_mode: int`, `temperature: int \| None = None`, `duration: int = COMFORT_DURATION` | Set the regulation mode based on the input.<br> - `resource`: An instance of a Thermostat model returned by `get_thermostats()`<br> - `regulation_mode`: An integer representing the regulation mode, see "Regulation modes"<br> - `temperature`: An integer representing the temperature, eg: 2500. Only useful when setting the regulation mode to manual or comfort.<br> - `duration`: The duration in minutes to set the temperature for; only applies to comfort mode. |
 | `get_current_energy` | None | Return the current energy usage in kWh. This is the first value in the `energy` property list. |
+| `get_current_power` | None | Return the current power draw of the heating in W: the load while heating, and zero otherwise. Returns `None` if the load is unknown (only WG4-series thermostats report it). |
 
 ## Usage
 

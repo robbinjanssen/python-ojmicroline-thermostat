@@ -71,6 +71,10 @@ class Thermostat:
     temperature: int | None = None
     set_point_temperature: int | None = None
 
+    # WG4-only fields:
+    utc_offset: timedelta | None = None
+    load_watts: int | None = None
+
     # WG5-only fields:
     building_id: str | None = None
     zone_uuid: str | None = None
@@ -184,6 +188,8 @@ class Thermostat:
             ),
             vacation_end_time=parse_wg4_date(data["VacationEndDay"] + " " + tz_offset),
             vacation_temperature=data["VacationTemperature"],
+            utc_offset=datetime.strptime(tz_offset, "%z").utcoffset(),
+            load_watts=parse_wg4_load(data),
         )
 
     @classmethod
@@ -328,6 +334,22 @@ class Thermostat:
 
         return 0.0
 
+    def get_current_power(self) -> float | None:
+        """Return the current power draw of the heating for the thermostat.
+
+        The thermostat switches its load either fully on or off, so the power
+        draw is the load while heating, and zero otherwise.
+
+        Returns
+        -------
+            The current power draw in W, or None if the load is unknown.
+
+        """
+        if self.load_watts is None:
+            return None
+
+        return float(self.load_watts) if self.heating else 0.0
+
 
 def parse_wd5_date(value: str, offset: int) -> datetime:
     """Parse a given value and offset into a datetime object.
@@ -372,3 +394,26 @@ def parse_wg4_date(value: str) -> datetime:
     value = "+".join(value.split("+")[:2]).strip()
 
     return datetime.strptime(value, WG4_DATETIME_FORMAT).astimezone()
+
+
+def parse_wg4_load(data: dict[str, Any]) -> int | None:
+    """Return the heating load of a WG4-series thermostat.
+
+    The thermostat either measures the load of the heating element connected
+    to it, or uses a value set manually during installation.
+
+    Args:
+    ----
+        data: The JSON data from the API.
+
+    Returns:
+    -------
+        The load in W, or None if it is unknown.
+
+    """
+    if data.get("LoadMeasuringActive"):
+        load = data.get("LoadMeasuredWatt")
+    else:
+        load = data.get("LoadManuallySetWatt")
+
+    return load or None

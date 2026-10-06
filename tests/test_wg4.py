@@ -3,16 +3,21 @@
 """Integration test for the WG4API class."""
 
 import json
+from datetime import timedelta
+from typing import Any
 from unittest.mock import patch
 
 import aiohttp
 import pytest
+from aiohttp import web
 from aresponses import Response, ResponsesMockServer  # type: ignore[import]
+from freezegun import freeze_time
 from ojmicroline_thermostat import (
     WG4API,
     OJMicroline,
     OJMicrolineAuthError,
     OJMicrolineError,
+    OJMicrolineResultsError,
     Thermostat,
 )
 from ojmicroline_thermostat.const import (
@@ -91,6 +96,7 @@ async def test_get_thermostats(aresponses: ResponsesMockServer) -> None:
             text=load_fixtures("wg4_group.json"),
         ),
     )
+    add_energy_usage_response(aresponses)
     async with aiohttp.ClientSession() as session:
         api = WG4API(
             host="ojmicroline.test.host",
@@ -107,6 +113,8 @@ async def test_get_thermostats(aresponses: ResponsesMockServer) -> None:
         assert len(thermostats) > 0
         for item in thermostats:
             assert item.serial_number is not None
+            assert item.energy is not None
+            assert len(item.energy) == 7
 
 
 @pytest.mark.asyncio
@@ -207,15 +215,95 @@ async def test_set_regulation_mode_failed(aresponses: ResponsesMockServer) -> No
             await client.set_regulation_mode(thermostat, REGULATION_COMFORT, 2500, 360)
 
 
-@pytest.mark.asyncio
-async def test_parse_energy_usage_response() -> None:
-    """Test that WG4 energy usage response parser returns an empty list."""
+def test_parse_energy_usage_response() -> None:
+    """Test that the days of all weeks in the response are returned in order."""
     api = WG4API(
         host="ojmicroline.test.host",
         username="py",
         password="test",
     )
-    assert not api.parse_energy_usage_response({})
+    data = json.loads(load_fixtures("wg4_energy.json"))
+
+    assert api.parse_energy_usage_response(data) == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.2,
+        2.5,
+        3.1,
+        4.2,
+        5.3,
+        6.4,
+        7.5,
+        8.6,
+        9.7,
+        10.8,
+    ]
+
+
+@pytest.mark.parametrize("data", [{}, {"EnergyUsage": []}, {"Message": "Error"}])
+def test_parse_energy_usage_response_failed(data: dict[str, Any]) -> None:
+    """Test that a response without energy usage raises an error."""
+    api = WG4API(
+        host="ojmicroline.test.host",
+        username="py",
+        password="test",
+    )
+
+    with pytest.raises(OJMicrolineResultsError):
+        api.parse_energy_usage_response(data)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("now", "today", "expected"),
+    [
+        # Monday evening in the thermostat's time zone, but already
+        # Tuesday in UTC:
+        ("2026-10-06 03:00:00", "2026-10-05", [2.5, 3.1, 4.2, 5.3, 6.4, 7.5, 8.6]),
+        # Sunday, the first day of the week:
+        ("2026-10-04 12:00:00", "2026-10-04", [3.1, 4.2, 5.3, 6.4, 7.5, 8.6, 9.7]),
+        # Saturday, the last day of the week:
+        ("2026-10-10 12:00:00", "2026-10-10", [0.0, 0.0, 0.0, 0.0, 1.2, 2.5, 3.1]),
+    ],
+)
+async def test_get_energy_usage(
+    aresponses: ResponsesMockServer, now: str, today: str, expected: list[float]
+) -> None:
+    """Test that the usage of today and the six previous days is returned."""
+
+    def handler(request: web.Request) -> web.Response:
+        assert request.query["sessionid"] == "f00b4r"
+        assert request.query["serialnumber"] == "42424242"
+        assert request.query["view"] == "week"
+        assert request.query["date"] == today
+        assert request.query["history"] == "1"
+        assert request.query["weekstart"] == "sunday"
+        return Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg4_energy.json"),
+        )
+
+    aresponses.add("ojmicroline.test.host", "/api/energyusage", "GET", handler)
+    async with aiohttp.ClientSession() as session:
+        api = WG4API(
+            host="ojmicroline.test.host",
+            username="py",
+            password="test",
+        )
+        api._session_calls_left = 300
+        api._session_id = "f00b4r"
+        OJMicroline(api=api, session=session)
+
+        thermostat = Thermostat.from_wg4_json(
+            json.loads(load_fixtures("wg4_thermostat.json"))
+        )
+        thermostat.utc_offset = timedelta(hours=-4)
+
+        with freeze_time(now):
+            assert await api.get_energy_usage(thermostat) == expected
 
 
 def test_login_body_default_application() -> None:
@@ -250,6 +338,7 @@ async def test_get_notifications_subscribes_new_session(
             text=load_fixtures("wg4_group.json"),
         ),
     )
+    add_energy_usage_response(aresponses)
     async with aiohttp.ClientSession() as session:
         api = WG4API(
             host="ojmicroline.test.host",
@@ -293,7 +382,7 @@ async def test_get_notifications_update(aresponses: ResponsesMockServer) -> None
 
         assert len(thermostats) == 1
         assert thermostats[0].serial_number == "42424242"
-        assert thermostats[0].energy == []
+        assert thermostats[0].energy is None
 
 
 @pytest.mark.asyncio
@@ -320,3 +409,18 @@ async def test_get_notifications_no_change(aresponses: ResponsesMockServer) -> N
         OJMicroline(api=api, session=session)
 
         assert await api.get_notifications() == []
+
+
+def add_energy_usage_response(aresponses: ResponsesMockServer) -> None:
+    """Respond to any number of energy usage requests."""
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/energyusage",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg4_energy.json"),
+        ),
+        repeat=aresponses.INFINITY,
+    )

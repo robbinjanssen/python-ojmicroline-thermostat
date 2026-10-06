@@ -214,9 +214,6 @@ class SessionOJMicrolineAPI:
         """Get the energy usage for the provided thermostat."""
         date_tomorrow = (datetime.now(tz=UTC) + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        if self.get_energy_usage_path == "":
-            return []
-
         data = await self.request(
             self.get_energy_usage_path,
             method=hdrs.METH_POST,

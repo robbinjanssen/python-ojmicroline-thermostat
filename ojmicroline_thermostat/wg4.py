@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from aiohttp import hdrs
 
 from .const import REGULATION_COMFORT, REGULATION_MANUAL
+from .exceptions import OJMicrolineResultsError
 from .models import Thermostat
 from .ojmicroline import SessionOJMicrolineAPI
 
@@ -67,10 +68,91 @@ class WG4API(SessionOJMicrolineAPI):
 
         return results
 
-    get_energy_usage_path: str = ""
+    get_energy_usage_path: str = "api/energyusage"
 
-    def parse_energy_usage_response(self, data: Any) -> list[float]:  # noqa: D102,ARG002
-        return []
+    def parse_energy_usage_response(self, data: Any) -> list[float]:
+        """Parse an HTTP response containing energy usage data.
+
+        The response contains the kWh per day of one or more calendar weeks
+        (starting on Sunday), newest week and newest day first.
+
+        Args:
+        ----
+            data: The JSON data from the API.
+
+        Returns:
+        -------
+            The kWh per day of all weeks in the response, newest first.
+
+        Raises:
+        ------
+            OJMicrolineResultsError: The response holds no energy usage.
+
+        """
+        if not data.get("EnergyUsage"):
+            msg = "Unable to get energy usage via API."
+            raise OJMicrolineResultsError(msg, {"data": data})
+
+        return [
+            day["EnergyKWattHour"]
+            for week in data["EnergyUsage"]
+            for day in week["Usage"]
+        ]
+
+    async def fetch_energy_usage(
+        self, resource: Thermostat, view: str, day: str, history: int = 0
+    ) -> list[float]:
+        """Fetch energy usage as listed on the "Energy Use" page of the website.
+
+        Args:
+        ----
+            resource: The Thermostat model.
+            view: "day" for the kWh per hour of a day, "week" for the kWh per
+                day of a calendar week (see week_index), or "year" for the kWh
+                per month of a year.
+            day: The date (or for "year", the year) to fetch.
+            history: The number of previous days, weeks (at most 10) or years
+                to include.
+
+        Returns:
+        -------
+            The kWh per hour, day or month, newest first.
+
+        """
+        data = await self.request(
+            self.get_energy_usage_path,
+            method=hdrs.METH_GET,
+            params={
+                "sessionid": self._session_id,
+                "serialnumber": resource.serial_number,
+                "view": view,
+                "date": day,
+                "history": history,
+                "calc": "yes",
+                "weekstart": "sunday",
+            },
+        )
+        return self.parse_energy_usage_response(data)
+
+    async def get_energy_usage(self, resource: Thermostat) -> list[float]:
+        """Get the energy usage for the provided thermostat.
+
+        Args:
+        ----
+            resource: The Thermostat model.
+
+        Returns:
+        -------
+            The kWh per day for the current day (in the thermostat's time zone)
+            and the six previous days, newest first.
+
+        """
+        today = (datetime.now(tz=UTC) + (resource.utc_offset or timedelta())).date()
+
+        # The last seven days span the current and the previous week.
+        days = await self.fetch_energy_usage(resource, "week", today.isoformat(), 1)
+        index = week_index(today)
+        return days[index : index + 7]
 
     update_regulation_mode_path: str = "api/thermostat"
 
@@ -128,6 +210,9 @@ class WG4API(SessionOJMicrolineAPI):
         fetched the thermostat list, so the first call after a (re)login
         fetches and returns every thermostat to (re)subscribe the session.
 
+        As energy usage only changes once per hour, it isn't fetched for a
+        changed thermostat; use get_energy_usage for that.
+
         Returns
         -------
             A list with the changed thermostat, every thermostat after
@@ -151,6 +236,21 @@ class WG4API(SessionOJMicrolineAPI):
         if not data.get("Thermostat"):
             return []
 
-        thermostat = Thermostat.from_wg4_json(data["Thermostat"])
-        thermostat.energy = await self.get_energy_usage(thermostat)
-        return [thermostat]
+        return [Thermostat.from_wg4_json(data["Thermostat"])]
+
+
+def week_index(day: date) -> int:
+    """Return the index of a day in the week view of the energy usage API.
+
+    The week view lists the days of a week from Saturday back to Sunday.
+
+    Args:
+    ----
+        day: The day.
+
+    Returns:
+    -------
+        The index of the day within its week.
+
+    """
+    return (5 - day.weekday()) % 7

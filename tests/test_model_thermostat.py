@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 from freezegun import freeze_time
@@ -192,9 +193,16 @@ async def test_thermostat_from_json_wg4() -> None:
     assert thermostat.vacation_begin_time == datetime(2024, 2, 12, tzinfo=tzinfo)
     assert thermostat.vacation_end_time == datetime(2024, 2, 16, tzinfo=tzinfo)
 
+    assert thermostat.utc_offset == timedelta(hours=-6)
+    assert thermostat.load_watts == 1150
+
     # Test the getter methods:
     assert thermostat.get_current_temperature() == 2200
     assert thermostat.get_target_temperature() == 2600
+    assert thermostat.get_current_power() == 0.0
+
+    thermostat.heating = True
+    assert thermostat.get_current_power() == 1150.0
 
 
 @pytest.mark.asyncio
@@ -327,6 +335,42 @@ async def test_thermostat_get_current_energy_with_data() -> None:
     assert thermostat.get_current_energy() == 0.0
 
 
+@pytest.mark.parametrize(
+    ("load", "expected"),
+    [
+        # The measured load is used while load measuring is active:
+        ({"LoadMeasuringActive": True}, 1150),
+        # Otherwise the manually set load is used:
+        ({"LoadMeasuringActive": False}, 100),
+        # The load is unknown if the relevant value is missing or zero:
+        ({"LoadMeasuringActive": True, "LoadMeasuredWatt": 0}, None),
+        ({"LoadMeasuringActive": False, "LoadManuallySetWatt": None}, None),
+    ],
+)
+def test_thermostat_from_json_wg4_load(
+    load: dict[str, Any], expected: int | None
+) -> None:
+    """Test the load of a WG4-series thermostat."""
+    data = json.loads(load_fixtures("wg4_thermostat.json"))
+    data.update(load)
+    data["Heating"] = True
+    thermostat = Thermostat.from_wg4_json(data)
+
+    assert thermostat.load_watts == expected
+    assert thermostat.get_current_power() == expected
+
+
+def test_thermostat_from_json_wg4_without_load() -> None:
+    """Test that the load is unknown if the API doesn't report it."""
+    data = json.loads(load_fixtures("wg4_thermostat.json"))
+    for key in ("LoadMeasuringActive", "LoadMeasuredWatt", "LoadManuallySetWatt"):
+        del data[key]
+    thermostat = Thermostat.from_wg4_json(data)
+
+    assert thermostat.load_watts is None
+    assert thermostat.get_current_power() is None
+
+
 REQUIRED_FIELDS = [
     "model",
     "serial_number",
@@ -353,6 +397,8 @@ REQUIRED_FIELDS = [
 WG4_ONLY_FIELDS = [
     "temperature",
     "set_point_temperature",
+    "utc_offset",
+    "load_watts",
 ]
 
 WD5_ONLY_FIELDS = [
