@@ -414,3 +414,88 @@ async def test_login_server_error(aresponses: ResponsesMockServer) -> None:
 
         with pytest.raises(OJMicrolineConnectionError):
             await client.login()
+
+
+def _expired_api(refresh_token: str | None = "r3fr3sh") -> WG5API:
+    """Create a WG5API with an access token that is about to expire."""
+    api = _make_api()
+    api._access_token = "old"
+    api._refresh_token = refresh_token
+    # Within the 30 second renewal margin, so login() renews it.
+    api._token_expiry = datetime.now(tz=UTC) + timedelta(seconds=10)
+    return api
+
+
+@pytest.mark.asyncio
+async def test_login_uses_refresh_token(aresponses: ResponsesMockServer) -> None:
+    """Test an expiring access token is renewed with the refresh token."""
+    grants: list[dict[str, str]] = []
+
+    async def token_handler(request: web.Request) -> Response:
+        form = await request.post()
+        grants.append({key: str(value) for key, value in form.items()})
+        return Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg5_token.json"),
+        )
+
+    aresponses.add("identity.test.host", "/connect/token", "POST", token_handler)
+    async with aiohttp.ClientSession() as session:
+        api = _expired_api()
+        await OJMicroline(api=api, session=session).login()
+
+    assert len(grants) == 1
+    assert grants[0]["grant_type"] == "refresh_token"
+    assert grants[0]["refresh_token"] == "r3fr3sh"
+    assert "password" not in grants[0]
+    assert api._access_token != "old"
+
+
+@pytest.mark.asyncio
+async def test_login_falls_back_to_password(aresponses: ResponsesMockServer) -> None:
+    """Test a rejected refresh token falls back to the password grant."""
+    grants: list[str] = []
+
+    async def token_handler(request: web.Request) -> Response:
+        grant = (await request.post())["grant_type"]
+        grants.append(str(grant))
+        if grant == "refresh_token":
+            return Response(status=400, text='{"error": "invalid_grant"}')
+        return Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg5_token.json"),
+        )
+
+    aresponses.add(
+        "identity.test.host", "/connect/token", "POST", token_handler, repeat=2
+    )
+    async with aiohttp.ClientSession() as session:
+        api = _expired_api()
+        await OJMicroline(api=api, session=session).login()
+
+    assert grants == ["refresh_token", "password"]
+    assert api._access_token != "old"
+
+
+@pytest.mark.asyncio
+async def test_login_without_refresh_token_uses_password(
+    aresponses: ResponsesMockServer,
+) -> None:
+    """Test the password grant is used when there is no refresh token."""
+    grants: list[str] = []
+
+    async def token_handler(request: web.Request) -> Response:
+        grants.append(str((await request.post())["grant_type"]))
+        return Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg5_token.json"),
+        )
+
+    aresponses.add("identity.test.host", "/connect/token", "POST", token_handler)
+    async with aiohttp.ClientSession() as session:
+        await OJMicroline(api=_expired_api(None), session=session).login()
+
+    assert grants == ["password"]
