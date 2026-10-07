@@ -284,45 +284,6 @@ We've set up a separate document for our
 
 Thank you for being involved! :heart_eyes:
 
-## Setting up development environment
-
-This Python project is fully managed using the [uv][uv] package manager.
-
-You need at least:
-
-- Python 3.11+
-- [uv][uv-install]
-
-Install all packages, including all development requirements:
-
-```bash
-uv sync
-```
-
-uv creates a virtual environment in `.venv` and installs all necessary
-packages in it. Run commands in it with `uv run`.
-
-Set up the pre-commit checks with [prek][prek]:
-
-```bash
-uv run prek install
-```
-
-*Now you're all set to get started!*
-
-All changes are linted and tested with each commit. You can run all checks
-and tests manually, using the following command:
-
-```bash
-uv run prek run --all-files
-```
-
-To run just the Python tests:
-
-```bash
-uv run pytest
-```
-
 ## License
 
 MIT License
@@ -373,6 +334,3 @@ SOFTWARE.
 [stars-shield]: https://img.shields.io/github/stars/robbinjanssen/python-ojmicroline-thermostat.svg
 [stars-url]: https://github.com/robbinjanssen/python-ojmicroline-thermostat/stargazers
 
-[prek]: https://prek.j178.dev
-[uv]: https://docs.astral.sh/uv/
-[uv-install]: https://docs.astral.sh/uv/getting-started/installation/
