@@ -10,5 +10,6 @@ lint.extend-ignore = [
   "SLF001", # Tests will access private/protected members
   "S105", # Ignore possible hardcoded passwords
   "S106", # Ignore possible passwords
+  "S107", # Ignore possible passwords in default arguments
   "ANN001", # Ignore missing annotations
 ]

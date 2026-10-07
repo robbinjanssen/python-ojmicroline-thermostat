@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,11 @@ from .models import Thermostat
 
 if TYPE_CHECKING:
     from .ojmicroline import RequestFunc
+
+_LOGGER = logging.getLogger(__name__)
+
+# Renew the access token this long before it expires.
+TOKEN_REFRESH_MARGIN = timedelta(seconds=30)
 
 WG5_SCOPES = (
     "ugw.zones ugw.users ugw.profile ugw.buildings ugw.schedules "
@@ -62,7 +68,11 @@ class WG5API:
         self._token_expiry: datetime | None = None
 
     async def login(self) -> None:
-        """Authenticate via OAuth2 Resource Owner Password Credentials grant.
+        """Get a valid access token via OAuth2.
+
+        The access token is renewed shortly before it expires, with the
+        refresh token when there is one, and otherwise (or when the refresh
+        token is rejected) with the username and password.
 
         Raises
         ------
@@ -72,22 +82,50 @@ class WG5API:
         if (
             self._access_token
             and self._token_expiry
-            and self._token_expiry > datetime.now(tz=UTC)
+            and self._token_expiry - TOKEN_REFRESH_MARGIN > datetime.now(tz=UTC)
         ):
             return
 
+        if self._refresh_token:
+            try:
+                await self._request_token(
+                    {
+                        "grant_type": "refresh_token",
+                        "refresh_token": self._refresh_token,
+                    }
+                )
+            except OJMicrolineAuthError:
+                _LOGGER.debug("Refresh token rejected, logging in with password")
+                self._refresh_token = None
+            else:
+                return
+
+        await self._request_token(
+            {
+                "grant_type": "password",
+                "username": self.username,
+                "password": self.password,
+            }
+        )
+
+    async def _request_token(self, grant: dict[str, str]) -> None:
+        """Request a new access token from the identity server.
+
+        Args:
+        ----
+            grant: The grant type and its fields.
+
+        Raises:
+        ------
+            OJMicrolineAuthError: The identity server rejected the grant.
+
+        """
         try:
             data = await self.request(
                 "connect/token",
                 method="POST",
                 host=self.identity_host,
-                form={
-                    "grant_type": "password",
-                    "username": self.username,
-                    "password": self.password,
-                    "client_id": self.client_id,
-                    "scope": WG5_SCOPES,
-                },
+                form={**grant, "client_id": self.client_id, "scope": WG5_SCOPES},
                 request_timeout=30,
             )
         except OJMicrolineError as err:
@@ -99,7 +137,7 @@ class WG5API:
             raise
 
         self._access_token = data["access_token"]
-        self._refresh_token = data.get("refresh_token")
+        self._refresh_token = data.get("refresh_token", self._refresh_token)
         self._token_expiry = datetime.now(tz=UTC) + timedelta(
             seconds=data["expires_in"]
         )
