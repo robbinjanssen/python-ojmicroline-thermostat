@@ -19,6 +19,7 @@ from ojmicroline_thermostat import (
     OJMicrolineAuthError,
     OJMicrolineError,
     OJMicrolineResultsError,
+    OJMicrolineUnauthorizedError,
     Thermostat,
 )
 from ojmicroline_thermostat.const import (
@@ -425,3 +426,69 @@ def add_energy_usage_response(aresponses: ResponsesMockServer) -> None:
         ),
         repeat=aresponses.INFINITY,
     )
+
+
+def add_login_response(aresponses: ResponsesMockServer, session_id: str) -> None:
+    """Respond to a login request with the given session ID."""
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/authenticate/user",
+        "POST",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"SessionId": session_id, "ErrorCode": 0}),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_thermostats_expired_session(aresponses: ResponsesMockServer) -> None:
+    """Test an expired session is replaced by logging in again (issue #688)."""
+    aresponses.add(
+        "ojmicroline.test.host", "/api/thermostats", "GET", Response(status=401)
+    )
+    add_login_response(aresponses, "n3wsess10n")
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/thermostats",
+        "GET",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg4_group.json"),
+        ),
+    )
+    add_energy_usage_response(aresponses)
+    async with aiohttp.ClientSession() as session:
+        api = WG4API(host="ojmicroline.test.host", username="py", password="test")
+        api._session_calls_left = 300
+        api._session_id = "exp1red"
+        client = OJMicroline(api=api, session=session)
+
+        thermostats = await client.get_thermostats()
+
+        assert len(thermostats) > 0
+        assert api._session_id == "n3wsess10n"
+        assert api._session_calls_left == api._session_calls
+
+
+@pytest.mark.asyncio
+async def test_get_thermostats_rejected_twice(aresponses: ResponsesMockServer) -> None:
+    """Test the request is only retried once when the new session is rejected too."""
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/thermostats",
+        "GET",
+        Response(status=401),
+        repeat=2,
+    )
+    add_login_response(aresponses, "n3wsess10n")
+    async with aiohttp.ClientSession() as session:
+        api = WG4API(host="ojmicroline.test.host", username="py", password="test")
+        api._session_calls_left = 300
+        api._session_id = "exp1red"
+        client = OJMicroline(api=api, session=session)
+
+        with pytest.raises(OJMicrolineUnauthorizedError):
+            await client.get_thermostats()

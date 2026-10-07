@@ -111,6 +111,11 @@ class WG5API:
             seconds=data["expires_in"]
         )
 
+    def invalidate_session(self) -> None:
+        """Forget the access token, so the next login requests a new one."""
+        self._access_token = None
+        self._token_expiry = None
+
     async def _auth_request(
         self,
         uri: str,

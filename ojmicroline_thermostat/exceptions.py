@@ -19,3 +19,7 @@ class OJMicrolineResultsError(OJMicrolineError):
 
 class OJMicrolineTimeoutError(OJMicrolineError):
     """API request timed out."""
+
+
+class OJMicrolineUnauthorizedError(OJMicrolineError):
+    """API rejected the session or access token (HTTP 401)."""
