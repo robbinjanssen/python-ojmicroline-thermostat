@@ -7,7 +7,8 @@ from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import pytest
-from aresponses import Response, ResponsesMockServer  # type: ignore[import]
+from aresponses import Response, ResponsesMockServer
+
 from ojmicroline_thermostat import (
     OJMicroline,
     OJMicrolineAuthError,

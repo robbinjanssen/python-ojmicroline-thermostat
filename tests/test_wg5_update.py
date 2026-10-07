@@ -7,8 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import pytest
-from aresponses import Response, ResponsesMockServer  # type: ignore[import]
+from aresponses import Response, ResponsesMockServer
 from freezegun import freeze_time
+
 from ojmicroline_thermostat import (
     OJMicroline,
     OJMicrolineError,

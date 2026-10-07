@@ -187,7 +187,7 @@ class WG4API(SessionOJMicrolineAPI):
         }
 
     def parse_update_regulation_mode_response(self, data: Any) -> bool:  # noqa: D102
-        return data["Success"]
+        return bool(data["Success"])
 
     supports_notifications: bool = True
 

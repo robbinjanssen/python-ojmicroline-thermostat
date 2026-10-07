@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import pytest
 import pytz
 from freezegun import freeze_time
+
 from ojmicroline_thermostat.const import (
     COMFORT_DURATION,
     REGULATION_BOOST,

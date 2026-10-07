@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from freezegun import freeze_time
+
 from ojmicroline_thermostat.const import (
     COMFORT_DURATION,
     REGULATION_COMFORT,

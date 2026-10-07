@@ -544,7 +544,7 @@ class OJMicroline:
             try:
                 await self.login()
                 thermostats = await self.__api.get_notifications()
-            except Exception as exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            except Exception as exception:  # pylint: disable=broad-exception-caught
                 if isinstance(exception, OJMicrolineUnauthorizedError):
                     self.__api.invalidate_session()
                 _LOGGER.warning(
