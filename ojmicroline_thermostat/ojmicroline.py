@@ -12,10 +12,11 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Protocol, Self
+from http import HTTPStatus
+from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 
 import async_timeout
-from aiohttp import ClientError, ClientSession, hdrs
+from aiohttp import ClientError, ClientResponseError, ClientSession, hdrs
 from yarl import URL
 
 from .const import (
@@ -28,6 +29,7 @@ from .exceptions import (
     OJMicrolineConnectionError,
     OJMicrolineError,
     OJMicrolineTimeoutError,
+    OJMicrolineUnauthorizedError,
 )
 
 if TYPE_CHECKING:
@@ -41,6 +43,8 @@ RequestFunc = Callable[..., Awaitable[Any]]
 # a coroutine function; a returned awaitable is awaited before the next
 # notification is dispatched.
 Listener = Callable[["Thermostat"], Any]
+
+_T = TypeVar("_T")
 
 
 class OJMicrolineAPI(Protocol):
@@ -63,6 +67,9 @@ class OJMicrolineAPI(Protocol):
 
     async def login(self) -> None:
         """Perform authentication against the API."""
+
+    def invalidate_session(self) -> None:
+        """Forget the current session, so the next login creates a new one."""
 
     async def get_thermostats(self) -> list[Thermostat]:
         """Fetch all thermostats."""
@@ -186,6 +193,11 @@ class SessionOJMicrolineAPI:
 
             self._session_calls_left = self._session_calls
             self._session_id = data["SessionId"]
+
+    def invalidate_session(self) -> None:
+        """Forget the current session, so the next login creates a new one."""
+        self._session_id = None
+        self._session_calls_left = 0
 
     async def get_thermostats(self) -> list[Thermostat]:
         """Get all the thermostats.
@@ -360,6 +372,12 @@ class OJMicroline:
         except TimeoutError as exception:
             msg = "Timeout occurred while connecting to the OJ Microline API."
             raise OJMicrolineTimeoutError(msg) from exception
+        except ClientResponseError as exception:
+            if exception.status == HTTPStatus.UNAUTHORIZED:
+                msg = "The OJ Microline API rejected the session (HTTP 401)."
+                raise OJMicrolineUnauthorizedError(msg) from exception
+            msg = f"The OJ Microline API responded with HTTP {exception.status}."
+            raise OJMicrolineConnectionError(msg) from exception
         except (ClientError, socket.gaierror) as exception:
             msg = "Error occurred while communicating with the OJ Microline API."
             raise OJMicrolineConnectionError(msg) from exception
@@ -384,6 +402,30 @@ class OJMicroline:
         """
         await self.__api.login()
 
+    async def _with_session(self, call: Callable[[], Awaitable[_T]]) -> _T:
+        """Log in and run the call, logging in again once if the session expired.
+
+        The API can invalidate a session or access token before it is due to
+        expire. A request then fails with HTTP 401; a fresh login fixes that.
+
+        Args:
+        ----
+            call: The API call to run.
+
+        Returns:
+        -------
+            The result of the call.
+
+        """
+        await self.login()
+        try:
+            return await call()
+        except OJMicrolineUnauthorizedError:
+            _LOGGER.debug("The OJ Microline API rejected the session, logging in again")
+            self.__api.invalidate_session()
+            await self.login()
+            return await call()
+
     async def get_thermostats(self) -> list[Thermostat]:
         """Get all the thermostats.
 
@@ -392,8 +434,7 @@ class OJMicroline:
             A list of Thermostats objects.
 
         """
-        await self.login()
-        return await self.__api.get_thermostats()
+        return await self._with_session(self.__api.get_thermostats)
 
     async def get_energy_usage(self, resource: Thermostat) -> list[float]:
         """Get the energy usage.
@@ -413,8 +454,7 @@ class OJMicroline:
             OJMicrolineError: An error occurred while fetching the energy usage.
 
         """
-        await self.login()
-        return await self.__api.get_energy_usage(resource)
+        return await self._with_session(lambda: self.__api.get_energy_usage(resource))
 
     async def set_regulation_mode(
         self,
@@ -446,9 +486,10 @@ class OJMicroline:
             OJMicrolineError: An error occurred while setting the regulation mode.
 
         """
-        await self.login()
-        return await self.__api.set_regulation_mode(
-            resource, regulation_mode, temperature, duration
+        return await self._with_session(
+            lambda: self.__api.set_regulation_mode(
+                resource, regulation_mode, temperature, duration
+            )
         )
 
     def subscribe(self, listener: Listener) -> Callable[[], None]:
@@ -504,7 +545,9 @@ class OJMicroline:
             try:
                 await self.login()
                 thermostats = await self.__api.get_notifications()
-            except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            except Exception as exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+                if isinstance(exception, OJMicrolineUnauthorizedError):
+                    self.__api.invalidate_session()
                 _LOGGER.warning(
                     "Waiting for notifications failed, retrying in %.0f seconds",
                     delay,
