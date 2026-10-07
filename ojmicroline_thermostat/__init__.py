@@ -6,6 +6,7 @@ from .exceptions import (
     OJMicrolineError,
     OJMicrolineResultsError,
     OJMicrolineTimeoutError,
+    OJMicrolineUnauthorizedError,
 )
 from .models import Thermostat
 from .ojmicroline import OJMicroline
@@ -23,5 +24,6 @@ __all__ = [
     "OJMicrolineError",
     "OJMicrolineResultsError",
     "OJMicrolineTimeoutError",
+    "OJMicrolineUnauthorizedError",
     "Thermostat",
 ]
