@@ -7,7 +7,8 @@ from unittest.mock import patch
 
 import aiohttp
 import pytest
-from aresponses import Response, ResponsesMockServer  # type: ignore[import]
+from aresponses import Response, ResponsesMockServer
+
 from ojmicroline_thermostat import (
     WD5API,
     OJMicroline,

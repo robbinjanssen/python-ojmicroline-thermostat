@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 import aiohttp
 import pytest
-from aresponses import Response, ResponsesMockServer  # type: ignore[import]
+from aresponses import Response, ResponsesMockServer
+
 from ojmicroline_thermostat import (
     WG4API,
     OJMicroline,
@@ -51,7 +52,9 @@ async def test_json_request(aresponses: ResponsesMockServer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_timeout(monkeypatch, aresponses: ResponsesMockServer) -> None:
+async def test_timeout(
+    monkeypatch: pytest.MonkeyPatch, aresponses: ResponsesMockServer
+) -> None:
     """Test request timeout."""
 
     async def response_handler(_: aiohttp.ClientResponse) -> None:
@@ -229,7 +232,7 @@ async def test_subscribe_dispatches_notifications() -> None:
 
 
 @pytest.mark.asyncio
-async def test_subscribe_retries_after_error(caplog) -> None:
+async def test_subscribe_retries_after_error(caplog: pytest.LogCaptureFixture) -> None:
     """Test that a failed wait is logged and retried with a delay."""
     api = FakeNotificationAPI(
         [OJMicrolineConnectionError("boom"), KeyError("Thermostat"), [_thermostat("a")]]
@@ -250,7 +253,9 @@ async def test_subscribe_retries_after_error(caplog) -> None:
 
 
 @pytest.mark.asyncio
-async def test_subscribe_listener_error_is_isolated(caplog) -> None:
+async def test_subscribe_listener_error_is_isolated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Test that a failing listener does not affect the others."""
     api = FakeNotificationAPI([[_thermostat("a")]])
     done = asyncio.Event()

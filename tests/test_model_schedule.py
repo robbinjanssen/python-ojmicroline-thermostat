@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from freezegun import freeze_time
+
 from ojmicroline_thermostat.models import Schedule
 
 from . import load_fixtures

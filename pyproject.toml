@@ -1,19 +1,17 @@
-[tool.poetry]
+[project]
 name = "ojmicroline-thermostat"
-version = "4.0.0"
+# The version is set from the release tag by the release workflow.
+version = "0.0.0"
 description = "Asynchronous Python client controlling an OJ Microline Thermostat."
-authors = ["Robbin Janssen <robbinjanssen@gmail.com>"]
-maintainers = ["Robbin Janssen <robbinjanssen@gmail.com>"]
+authors = [{ name = "Robbin Janssen", email = "robbinjanssen@gmail.com" }]
+maintainers = [{ name = "Robbin Janssen", email = "robbinjanssen@gmail.com" }]
 license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
-homepage = "https://github.com/robbinjanssen/python-ojmicroline-thermostat"
-repository = "https://github.com/robbinjanssen/python-ojmicroline-thermostat"
-documentation = "https://github.com/robbinjanssen/python-ojmicroline-thermostat"
-keywords = ["async", "client", "thermostat", "ojmicroline", "thermostat"]
+keywords = ["async", "client", "thermostat", "ojmicroline"]
 classifiers = [
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -22,36 +20,40 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-packages = [
-    { include = "ojmicroline_thermostat" }
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.0.0",
+    "yarl>=1.6.0",
 ]
 
-[tool.poetry.dependencies]
-aiohttp = ">=3.0.0"
-python = "^3.11"
-yarl = ">=1.6.0"
-
-[tool.poetry.urls]
+[project.urls]
+Homepage = "https://github.com/robbinjanssen/python-ojmicroline-thermostat"
+Repository = "https://github.com/robbinjanssen/python-ojmicroline-thermostat"
+Documentation = "https://github.com/robbinjanssen/python-ojmicroline-thermostat"
 "Bug Tracker" = "https://github.com/robbinjanssen/python-ojmicroline-thermostat/issues"
 Changelog = "https://github.com/robbinjanssen/python-ojmicroline-thermostat/releases"
 
-[tool.poetry.group.dev.dependencies]
-aresponses = "3.0.0"
-codespell = "2.4.1"
-covdefaults = "2.3.0"
-coverage = {version = "7.13.4", extras = ["toml"]}
-mypy = "1.19.1"
-pre-commit = "4.5.1"
-pre-commit-hooks = "6.0.0"
-pylint = "4.0.4"
-pytest = "9.0.2"
-pytest-asyncio = "1.3.0"
-pytest-cov = "7.0.0"
-ruff = "0.15.12"
-yamllint = "1.38.0"
-pytz = "2025.2"
-types-pytz = "^2024.1.0.20240203"
-freezegun = "1.5.5"
+[dependency-groups]
+dev = [
+    "aresponses==3.0.0",
+    "codespell==2.4.3",
+    "covdefaults==2.3.0",
+    "coverage[toml]==7.16.2",
+    "freezegun==1.5.5",
+    "mypy==2.4.0",
+    "prek==0.5.5",
+    "pylint==4.1.2",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "pytz==2026.5",
+    "ruff==0.16.10",
+    "types-pytz==2026.5.0.20261006",
+    "yamllint==1.38.0",
+]
+
+[tool.uv.build-backend]
+module-root = ""
 
 [tool.coverage.run]
 plugins = ["covdefaults"]
@@ -66,7 +68,7 @@ show_missing = true
 # free to run mypy on Windows, Linux, or macOS and get consistent
 # results.
 platform = "linux"
-python_version = "3.13"
+python_version = "3.11"
 
 # flake8-mypy expects the two following for sensible formatting
 show_column_numbers = true
@@ -95,8 +97,10 @@ warn_return_any = true
 warn_unused_configs = true
 warn_unused_ignores = true
 
-[tool.pylint.MASTER]
-ignore = ["tests"]
+[[tool.mypy.overrides]]
+# aresponses is untyped, so its Response is Any in test handlers.
+module = "tests.*"
+warn_return_any = false
 
 [tool.pylint.BASIC]
 good-names = ["_", "ex", "fp", "i", "id", "j", "k", "on", "Run", "T"]
@@ -125,10 +129,11 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py311"
 lint.select = ["ALL"]
 lint.ignore = [
   "ANN401",  # Opinioated warning on disallowing dynamically typed expressions
+  "CPY001",  # No copyright headers in source files
   "D203",    # Conflicts with other rules
   "D213",    # Conflicts with other rules
   "D417",    # False positives in some occasions
@@ -149,11 +154,11 @@ mark-parentheses = false
 fixture-parentheses = false
 
 [tool.ruff.lint.isort]
-known-first-party = ["omnikinverter"]
+known-first-party = ["ojmicroline_thermostat"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25
 
 [build-system]
-build-backend = "poetry.core.masonry.api"
-requires = ["poetry-core>=1.0.0"]
+requires = ["uv_build>=0.12.23,<0.13"]
+build-backend = "uv_build"

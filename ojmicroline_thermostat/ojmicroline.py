@@ -503,7 +503,7 @@ class OJMicroline:
             try:
                 await self.login()
                 thermostats = await self.__api.get_notifications()
-            except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            except Exception:  # pylint: disable=broad-exception-caught
                 _LOGGER.warning(
                     "Waiting for notifications failed, retrying in %.0f seconds",
                     delay,

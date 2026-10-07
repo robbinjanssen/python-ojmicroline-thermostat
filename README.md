@@ -286,48 +286,41 @@ Thank you for being involved! :heart_eyes:
 
 ## Setting up development environment
 
-This Python project is fully managed using the [Poetry][poetry] dependency
-manager.
+This Python project is fully managed using the [uv][uv] package manager.
 
 You need at least:
 
 - Python 3.11+
-- [Poetry][poetry-install]
+- [uv][uv-install]
 
 Install all packages, including all development requirements:
 
 ```bash
-poetry install
+uv sync
 ```
 
-Poetry creates by default an virtual environment where it installs all
-necessary pip packages, to enter or exit the venv run the following commands:
+uv creates a virtual environment in `.venv` and installs all necessary
+packages in it. Run commands in it with `uv run`.
+
+Set up the pre-commit checks with [prek][prek]:
 
 ```bash
-poetry shell
-exit
-```
-
-Setup the pre-commit check, you must run this inside the virtual environment:
-
-```bash
-pre-commit install
+uv run prek install
 ```
 
 *Now you're all set to get started!*
 
-As this repository uses the [pre-commit][pre-commit] framework, all changes
-are linted and tested with each commit. You can run all checks and tests
-manually, using the following command:
+All changes are linted and tested with each commit. You can run all checks
+and tests manually, using the following command:
 
 ```bash
-poetry run pre-commit run --all-files
+uv run prek run --all-files
 ```
 
 To run just the Python tests:
 
 ```bash
-poetry run pytest
+uv run pytest
 ```
 
 ## License
@@ -380,6 +373,6 @@ SOFTWARE.
 [stars-shield]: https://img.shields.io/github/stars/robbinjanssen/python-ojmicroline-thermostat.svg
 [stars-url]: https://github.com/robbinjanssen/python-ojmicroline-thermostat/stargazers
 
-[poetry-install]: https://python-poetry.org/docs/#installation
-[poetry]: https://python-poetry.org
-[pre-commit]: https://pre-commit.com
+[prek]: https://prek.j178.dev
+[uv]: https://docs.astral.sh/uv/
+[uv-install]: https://docs.astral.sh/uv/getting-started/installation/

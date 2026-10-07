@@ -24,7 +24,7 @@ from .ojmicroline import SessionOJMicrolineAPI
 class WD5API(SessionOJMicrolineAPI):
     """Controls OJ Microline WD5-series thermostats (OWD5, MWD5, etc.)."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0917 - public API, keep positional arguments
         self,
         api_key: str,
         customer_id: int,
@@ -152,7 +152,7 @@ class WD5API(SessionOJMicrolineAPI):
         # "== 0" would seem more appropriate here, but as of this writing I
         # don't have a WD5-series thermostat to test with so I am preserving
         # the exact semantics of older code.
-        return data["ErrorCode"] != 1
+        return bool(data["ErrorCode"] != 1)
 
 
 def _fmt(d: datetime | None) -> Any:

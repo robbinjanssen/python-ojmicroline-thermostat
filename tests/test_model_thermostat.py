@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from freezegun import freeze_time
+
 from ojmicroline_thermostat.const import (
     REGULATION_BOOST,
     REGULATION_COMFORT,

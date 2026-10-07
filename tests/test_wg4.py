@@ -10,8 +10,9 @@ from unittest.mock import patch
 import aiohttp
 import pytest
 from aiohttp import web
-from aresponses import Response, ResponsesMockServer  # type: ignore[import]
+from aresponses import Response, ResponsesMockServer
 from freezegun import freeze_time
+
 from ojmicroline_thermostat import (
     WG4API,
     OJMicroline,
