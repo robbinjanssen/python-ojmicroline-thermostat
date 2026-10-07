@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from aiohttp import ClientSession
-from yarl import URL
+from aiohttp import ClientResponseError
 
 from .const import (
     REGULATION_COMFORT,
@@ -78,32 +76,27 @@ class WG5API:
         ):
             return
 
-        async with ClientSession() as session:
-            url = URL.build(
-                scheme="https", host=self.identity_host, path="/connect/token"
+        try:
+            data = await self.request(
+                "connect/token",
+                method="POST",
+                host=self.identity_host,
+                form={
+                    "grant_type": "password",
+                    "username": self.username,
+                    "password": self.password,
+                    "client_id": self.client_id,
+                    "scope": WG5_SCOPES,
+                },
+                request_timeout=30,
             )
-            async with asyncio.timeout(30):
-                response = await session.post(
-                    url,
-                    data={
-                        "grant_type": "password",
-                        "username": self.username,
-                        "password": self.password,
-                        "client_id": self.client_id,
-                        "scope": WG5_SCOPES,
-                    },
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Accept": "application/json",
-                    },
-                    ssl=True,
-                )
-
-            if response.status != 200:
+        except OJMicrolineError as err:
+            # The token endpoint rejects wrong credentials with 400 or 401.
+            cause = err.__cause__
+            if isinstance(cause, ClientResponseError) and cause.status in {400, 401}:
                 msg = "Unable to authenticate, wrong username or password."
-                raise OJMicrolineAuthError(msg)
-
-            data = await response.json()
+                raise OJMicrolineAuthError(msg) from err
+            raise
 
         self._access_token = data["access_token"]
         self._refresh_token = data.get("refresh_token")
