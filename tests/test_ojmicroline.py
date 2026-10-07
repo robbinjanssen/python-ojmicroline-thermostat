@@ -15,6 +15,7 @@ from ojmicroline_thermostat import (
     OJMicrolineConnectionError,
     OJMicrolineError,
     OJMicrolineTimeoutError,
+    OJMicrolineUnauthorizedError,
     Thermostat,
 )
 from ojmicroline_thermostat.ojmicroline import RequestFunc
@@ -156,9 +157,13 @@ class FakeNotificationAPI:
         """Store the scripted results; the stub blocks once they run out."""
         self.results = results
         self.logins = 0
+        self.invalidations = 0
 
     async def login(self) -> None:  # noqa: D102
         self.logins += 1
+
+    def invalidate_session(self) -> None:  # noqa: D102
+        self.invalidations += 1
 
     async def get_thermostats(self) -> list[Thermostat]:  # noqa: D102
         return []
@@ -291,3 +296,39 @@ async def test_close_stops_notifications() -> None:
 
     assert task.cancelled()
     assert client._OJMicroline__notification_task is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [(401, OJMicrolineUnauthorizedError), (500, OJMicrolineConnectionError)],
+)
+async def test_http_error_status(
+    aresponses: ResponsesMockServer, status: int, error: type[Exception]
+) -> None:
+    """Test a 401 is reported as unauthorized and other errors as connection."""
+    aresponses.add("ojmicroline.test.host", "/test", "GET", Response(status=status))
+    async with OJMicroline(
+        api=WG4API(host="ojmicroline.test.host", username="py", password="test"),
+    ) as client:
+        with pytest.raises(error):
+            await client._request("test")
+
+
+@pytest.mark.asyncio
+async def test_subscribe_invalidates_rejected_session() -> None:
+    """Test a rejected session is invalidated before the next wait."""
+    api = FakeNotificationAPI(
+        [OJMicrolineUnauthorizedError("expired"), [_thermostat("a")]]
+    )
+    done = asyncio.Event()
+
+    async def fake_sleep(_delay: float) -> None:
+        return
+
+    with patch("ojmicroline_thermostat.ojmicroline.asyncio.sleep", fake_sleep):
+        async with OJMicroline(api=api) as client:
+            client.subscribe(lambda _thermostat: done.set())
+            await asyncio.wait_for(done.wait(), 5)
+
+    assert api.invalidations == 1

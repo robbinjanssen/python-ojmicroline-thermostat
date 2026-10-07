@@ -359,3 +359,15 @@ async def test_notifications_unsupported() -> None:
     assert api.supports_notifications is False
     with pytest.raises(OJMicrolineError):
         await api.get_notifications()
+
+
+def test_invalidate_session() -> None:
+    """Test invalidating the session forgets the access token."""
+    api = _make_api()
+    api._access_token = "fake"
+    api._token_expiry = datetime.now(tz=UTC) + timedelta(hours=1)
+
+    api.invalidate_session()
+
+    assert api._access_token is None
+    assert api._token_expiry is None
