@@ -146,7 +146,8 @@ lint.ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"test_output.py" = ["ERA001", "T201"]
+# I001: config.py is untracked, so the import order differs between machines.
+"test_output.py" = ["ERA001", "I001", "T201"]
 "config_example.py" = ["D100", "C408", "S106"]
 
 [tool.ruff.lint.flake8-pytest-style]
