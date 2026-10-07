@@ -4,14 +4,17 @@
 
 import json
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import aiohttp
 import pytest
+from aiohttp import web
 from aresponses import Response, ResponsesMockServer
 
 from ojmicroline_thermostat import (
     OJMicroline,
     OJMicrolineAuthError,
+    OJMicrolineConnectionError,
     OJMicrolineError,
     Thermostat,
 )
@@ -372,3 +375,42 @@ def test_invalidate_session() -> None:
 
     assert api._access_token is None
     assert api._token_expiry is None
+
+
+@pytest.mark.asyncio
+async def test_login_uses_shared_session(aresponses: ResponsesMockServer) -> None:
+    """Test logging in posts a form through the session passed to OJMicroline."""
+
+    async def token_handler(request: web.Request) -> Response:
+        assert request.content_type == "application/x-www-form-urlencoded"
+        form = await request.post()
+        assert form["grant_type"] == "password"
+        assert form["username"] == "py"
+        assert form["client_id"] == "mobile_app_client"
+        return Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=load_fixtures("wg5_token.json"),
+        )
+
+    aresponses.add("identity.test.host", "/connect/token", "POST", token_handler)
+    async with aiohttp.ClientSession() as session:
+        api = _make_api()
+        client = OJMicroline(api=api, session=session)
+
+        with patch.object(session, "request", wraps=session.request) as request:
+            await client.login()
+
+        assert request.call_count == 1
+        assert api._access_token is not None
+
+
+@pytest.mark.asyncio
+async def test_login_server_error(aresponses: ResponsesMockServer) -> None:
+    """Test a server error is a connection error, not wrong credentials."""
+    aresponses.add("identity.test.host", "/connect/token", "POST", Response(status=500))
+    async with aiohttp.ClientSession() as session:
+        client = OJMicroline(api=_make_api(), session=session)
+
+        with pytest.raises(OJMicrolineConnectionError):
+            await client.login()

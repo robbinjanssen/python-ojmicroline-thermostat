@@ -306,15 +306,17 @@ class OJMicroline:
         self.__listeners = []
         self.__notification_task = None
 
-    async def _request(  # noqa: PLR0913  # pylint: disable=too-many-arguments
+    async def _request(  # noqa: PLR0913  # pylint: disable=too-many-arguments,too-many-locals
         self,
         uri: str,
         *,
         method: str = hdrs.METH_GET,
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
+        form: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         request_timeout: float | None = None,
+        host: str | None = None,
     ) -> Any:
         """Handle a request to the OJ Microline API.
 
@@ -324,8 +326,10 @@ class OJMicroline:
             method: HTTP method to use, for example, 'GET'
             params: Extra options to improve or limit the response.
             body: Data can be used in a POST and PATCH request.
+            form: Form fields, sent URL-encoded instead of a JSON body.
             headers: Additional HTTP headers to include.
             request_timeout: Timeout in seconds, overriding the default.
+            host: The host to send the request to, instead of the API host.
 
         Returns:
         -------
@@ -344,12 +348,14 @@ class OJMicroline:
                 self.__http_session = ClientSession()
                 self.__close_http_session = True
 
-            url = URL.build(scheme="https", host=self.__api.host, path="/").join(
-                URL(uri)
-            )
+            url = URL.build(
+                scheme="https", host=host or self.__api.host, path="/"
+            ).join(URL(uri))
 
             request_headers = {
-                "Content-Type": "application/json; charset=utf-8",
+                "Content-Type": "application/x-www-form-urlencoded"
+                if form is not None
+                else "application/json; charset=utf-8",
                 "Accept": "application/json",
             }
             if headers:
@@ -365,6 +371,7 @@ class OJMicroline:
                     params=params,
                     headers=request_headers,
                     json=body,
+                    data=form,
                     ssl=True,
                 )
                 response.raise_for_status()
