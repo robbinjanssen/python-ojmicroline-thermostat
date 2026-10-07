@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol, Self
 
-import async_timeout
 from aiohttp import ClientError, ClientSession, hdrs
 from yarl import URL
 
@@ -347,7 +346,7 @@ class OJMicroline:
             if request_timeout is None:
                 request_timeout = self.__request_timeout
 
-            async with async_timeout.timeout(request_timeout):
+            async with asyncio.timeout(request_timeout):
                 response = await self.__http_session.request(
                     method,
                     url,
