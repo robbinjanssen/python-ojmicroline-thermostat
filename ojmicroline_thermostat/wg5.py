@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-import async_timeout
 from aiohttp import ClientSession
 from yarl import URL
 
@@ -82,7 +82,7 @@ class WG5API:
             url = URL.build(
                 scheme="https", host=self.identity_host, path="/connect/token"
             )
-            async with async_timeout.timeout(30):
+            async with asyncio.timeout(30):
                 response = await session.post(
                     url,
                     data={

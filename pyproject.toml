@@ -51,7 +51,6 @@ ruff = "0.15.12"
 yamllint = "1.38.0"
 pytz = "2025.2"
 types-pytz = "^2024.1.0.20240203"
-async-timeout = "5.0.1"
 freezegun = "1.5.5"
 
 [tool.coverage.run]
