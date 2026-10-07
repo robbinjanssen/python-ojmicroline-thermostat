@@ -333,4 +333,3 @@ SOFTWARE.
 [releases]: https://github.com/robbinjanssen/python-ojmicroline-thermostat/releases
 [stars-shield]: https://img.shields.io/github/stars/robbinjanssen/python-ojmicroline-thermostat.svg
 [stars-url]: https://github.com/robbinjanssen/python-ojmicroline-thermostat/stargazers
-
