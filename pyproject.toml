@@ -10,6 +10,7 @@ license-files = ["LICENSE"]
 readme = "README.md"
 keywords = ["async", "client", "thermostat", "ojmicroline"]
 classifiers = [
+    "Development Status :: 5 - Production/Stable",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Natural Language :: English",
