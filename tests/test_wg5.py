@@ -138,7 +138,7 @@ async def test_login_skips_when_token_valid(aresponses: ResponsesMockServer) -> 
 
 @pytest.mark.asyncio
 async def test_get_thermostats(aresponses: ResponsesMockServer) -> None:
-    """Test fetching thermostats through the buildings->tree->control flow."""
+    """Test fetching thermostats through the buildings->tree->zone flow."""
     _add_login_response(aresponses)
     aresponses.add(
         "ojmicroline.test.host",
@@ -172,12 +172,12 @@ async def test_get_thermostats(aresponses: ResponsesMockServer) -> None:
     )
     aresponses.add(
         "ojmicroline.test.host",
-        "/thermostats/2cb3e6c5-8cf8-4e7e-943a-42618c34a506/control",
+        "/zones/ae85d8fc-1b4a-445a-bdf1-05f970fc3da4/control/thermostats",
         "GET",
         Response(
             status=200,
             headers={"Content-Type": "application/json"},
-            text=load_fixtures("wg5_thermostat_control.json"),
+            text=load_fixtures("wg5_zone_thermostats.json"),
         ),
     )
     aresponses.add(
@@ -263,16 +263,16 @@ async def test_get_thermostats_no_schedule_no_readouts(
         ),
     )
     # Control data with no scheduleId
-    control_data = json.loads(load_fixtures("wg5_thermostat_control.json"))
-    control_data["data"]["scheduleData"] = {}
+    zone_data = json.loads(load_fixtures("wg5_zone_thermostats.json"))
+    zone_data["data"][0]["scheduleData"] = {}
     aresponses.add(
         "ojmicroline.test.host",
-        "/thermostats/2cb3e6c5-8cf8-4e7e-943a-42618c34a506/control",
+        "/zones/ae85d8fc-1b4a-445a-bdf1-05f970fc3da4/control/thermostats",
         "GET",
         Response(
             status=200,
             headers={"Content-Type": "application/json"},
-            text=json.dumps(control_data),
+            text=json.dumps(zone_data),
         ),
     )
     # Detail data with no readout temperatures
@@ -300,6 +300,134 @@ async def test_get_thermostats_no_schedule_no_readouts(
         assert thermostat.schedule is None
         assert thermostat.temperature_floor is None
         assert thermostat.temperature_room is None
+
+
+ZONE_ID = "ae85d8fc-1b4a-445a-bdf1-05f970fc3da4"
+BUILDING_ID = "57dc7778-4ed3-4382-9e89-5cf2e0bc0f8a"
+SCHEDULE_ID = "f9aac20b-4e45-415b-9f56-e53014ee8639"
+
+
+def _json_response(data: object) -> Response:
+    """Return a JSON response for aresponses."""
+    return Response(
+        status=200,
+        headers={"Content-Type": "application/json"},
+        text=json.dumps(data),
+    )
+
+
+def _add_building_responses(
+    aresponses: ResponsesMockServer, tree: dict[str, object]
+) -> None:
+    """Add the login, buildings, away mode and tree responses."""
+    _add_login_response(aresponses)
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/buildings",
+        "GET",
+        _json_response(json.loads(load_fixtures("wg5_buildings.json"))),
+    )
+    aresponses.add(
+        "ojmicroline.test.host",
+        f"/awaymode/{BUILDING_ID}",
+        "GET",
+        _json_response({"status": {"code": "OK"}}),
+    )
+    aresponses.add(
+        "ojmicroline.test.host",
+        f"/buildings/{BUILDING_ID}/tree",
+        "GET",
+        _json_response(tree),
+    )
+
+
+def _zone_thermostat(thermostat_id: str) -> dict[str, object]:
+    """Return the zone control data of a thermostat with the given ID."""
+    data: dict[str, object] = json.loads(load_fixtures("wg5_zone_thermostats.json"))[
+        "data"
+    ][0]
+    data["id"] = thermostat_id
+    return data
+
+
+@pytest.mark.asyncio
+async def test_get_thermostats_zone_pages_and_shared_schedule(
+    aresponses: ResponsesMockServer,
+) -> None:
+    """Test fetching a zone over multiple pages, with a shared schedule."""
+    tree = json.loads(load_fixtures("wg5_building_tree.json"))
+    _add_building_responses(aresponses, tree)
+
+    page_numbers: list[str] = []
+    pages = [["thermostat-1", "thermostat-2"], ["thermostat-3"]]
+
+    async def zone_handler(request: web.BaseRequest) -> Response:
+        assert request.query["pageSize"] == "100"
+        page_number = int(request.query["pageNumber"])
+        page_numbers.append(request.query["pageNumber"])
+        return _json_response(
+            {
+                "page": {"total": 3, "totalPages": 2, "size": 100},
+                "data": [_zone_thermostat(tid) for tid in pages[page_number]],
+                "status": {"code": "OK"},
+            }
+        )
+
+    for _ in pages:
+        aresponses.add(
+            "ojmicroline.test.host",
+            f"/zones/{ZONE_ID}/control/thermostats",
+            "GET",
+            zone_handler,
+        )
+    detail = json.loads(load_fixtures("wg5_thermostat_detail.json"))
+    for thermostat_id in ("thermostat-1", "thermostat-2", "thermostat-3"):
+        aresponses.add(
+            "ojmicroline.test.host",
+            f"/thermostats/{thermostat_id}",
+            "GET",
+            _json_response(detail),
+        )
+    # The thermostats share one schedule, which is only fetched once.
+    aresponses.add(
+        "ojmicroline.test.host",
+        f"/schedules/{SCHEDULE_ID}",
+        "GET",
+        _json_response(json.loads(load_fixtures("wg5_schedule.json"))),
+    )
+
+    async with aiohttp.ClientSession() as session:
+        client = OJMicroline(api=_make_api(), session=session)
+        thermostats = await client.get_thermostats()
+
+    # Every route was used exactly once and no other requests were made.
+    aresponses.assert_no_unused_routes()
+    aresponses.assert_all_requests_matched()
+    assert page_numbers == ["0", "1"]
+    assert [t.serial_number for t in thermostats] == [
+        "thermostat-1",
+        "thermostat-2",
+        "thermostat-3",
+    ]
+    assert all(t.schedule is not None for t in thermostats)
+    # Every thermostat has its own copy of the shared schedule.
+    assert thermostats[0].schedule is not thermostats[1].schedule
+
+
+@pytest.mark.asyncio
+async def test_get_thermostats_skips_empty_zone(
+    aresponses: ResponsesMockServer,
+) -> None:
+    """Test that zones without thermostats are not requested."""
+    tree = json.loads(load_fixtures("wg5_building_tree.json"))
+    tree["data"]["zones"][0]["thermostats"] = []
+    _add_building_responses(aresponses, tree)
+
+    async with aiohttp.ClientSession() as session:
+        client = OJMicroline(api=_make_api(), session=session)
+        assert await client.get_thermostats() == []
+
+    aresponses.assert_plan_strictly_followed()
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +28,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Renew the access token this long before it expires.
 TOKEN_REFRESH_MARGIN = timedelta(seconds=30)
+
+# Number of thermostats requested per page of a zone.
+ZONE_PAGE_SIZE = 100
 
 WG5_SCOPES = (
     "ugw.zones ugw.users ugw.profile ugw.buildings ugw.schedules "
@@ -152,12 +156,14 @@ class WG5API:
         uri: str,
         *,
         method: str = "GET",
+        params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
         """Make an authenticated request with Bearer token."""
         return await self.request(
             uri,
             method=method,
+            params=params,
             body=body,
             headers={"Authorization": f"Bearer {self._access_token}"},
         )
@@ -167,28 +173,51 @@ class WG5API:
         data = await self._auth_request(f"awaymode/{building_id}")
         return "data" in data
 
+    async def _get_zone_control(self, zone_id: str) -> list[dict[str, Any]]:
+        """Fetch the control data of all thermostats in a zone.
+
+        This returns the same data as `thermostats/{id}/control` for every
+        thermostat in the zone, so a single request covers the whole zone.
+        """
+        thermostats: list[dict[str, Any]] = []
+        page_number = 0
+        while True:
+            data = await self._auth_request(
+                f"zones/{zone_id}/control/thermostats",
+                params={"pageNumber": page_number, "pageSize": ZONE_PAGE_SIZE},
+            )
+            thermostats.extend(data["data"])
+            page_number += 1
+            if page_number >= data.get("page", {}).get("totalPages", 1):
+                return thermostats
+
+    async def _get_schedule(
+        self,
+        schedule_id: str | None,
+        schedules: dict[str, dict[str, Any] | None],
+    ) -> dict[str, Any] | None:
+        """Fetch a schedule, once per update for thermostats sharing it."""
+        if not schedule_id:
+            return None
+        if schedule_id not in schedules:
+            resp = await self._auth_request(f"schedules/{schedule_id}")
+            schedules[schedule_id] = resp.get("data")
+        # Every thermostat gets its own copy of a shared schedule.
+        return deepcopy(schedules[schedule_id])
+
     async def _fetch_thermostat(
         self,
-        thermostat_id: str,
+        control_data: dict[str, Any],
         building_id: str,
         zone_name: str,
+        schedules: dict[str, dict[str, Any] | None],
         *,
         away_active: bool,
     ) -> Thermostat:
-        """Fetch and enrich a single thermostat."""
-        control_data = await self._auth_request(
-            f"thermostats/{thermostat_id}/control",
-        )
-        detail_data = await self._auth_request(
-            f"thermostats/{thermostat_id}",
-        )
-        schedule_id = control_data["data"].get("scheduleData", {}).get("scheduleId")
-        schedule_data = None
-        if schedule_id:
-            resp = await self._auth_request(f"schedules/{schedule_id}")
-            schedule_data = resp.get("data")
+        """Enrich the control data of a thermostat with its details."""
+        detail_data = await self._auth_request(f"thermostats/{control_data['id']}")
         thermostat = Thermostat.from_wg5_json(
-            control_data["data"],
+            control_data,
             building_id=building_id,
             zone_name=zone_name,
             away_active=away_active,
@@ -201,25 +230,30 @@ class WG5API:
         room = readouts.get("roomTemperature")
         if room is not None:
             thermostat.temperature_room = round(float(room) * 100)
-        thermostat.schedule = schedule_data
+        thermostat.schedule = await self._get_schedule(
+            control_data.get("scheduleData", {}).get("scheduleId"), schedules
+        )
         return thermostat
 
     async def get_thermostats(self) -> list[Thermostat]:
         """Fetch all thermostats across all buildings."""
         buildings_data = await self._auth_request("buildings")
         thermostats: list[Thermostat] = []
+        schedules: dict[str, dict[str, Any] | None] = {}
 
         for building in buildings_data["data"]:
             building_id = building["id"]
             away_active = await self._is_away_active(building_id)
             tree_data = await self._auth_request(f"buildings/{building_id}/tree")
             for zone in tree_data["data"]["zones"]:
-                zone_name = zone["name"]
-                for thermostat_stub in zone["thermostats"]:
+                if not zone["thermostats"]:
+                    continue
+                for control_data in await self._get_zone_control(zone["id"]):
                     thermostat = await self._fetch_thermostat(
-                        thermostat_stub["id"],
+                        control_data,
                         building_id,
-                        zone_name,
+                        zone["name"],
+                        schedules,
                         away_active=away_active,
                     )
                     thermostats.append(thermostat)
