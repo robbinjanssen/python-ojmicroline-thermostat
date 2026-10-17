@@ -324,7 +324,7 @@ SOFTWARE.
 [maintenance-shield]: https://img.shields.io/maintenance/yes/2026.svg
 [maintainability-shield]: https://api.codeclimate.com/v1/badges/d77f7409eb02e331261b/maintainability
 [maintainability-url]: https://codeclimate.com/github/robbinjanssen/python-ojmicroline-thermostat/maintainability
-[project-stage-shield]: https://img.shields.io/badge/project%20stage-experimental-yellow.svg
+[project-stage-shield]: https://img.shields.io/badge/project%20stage-stable-brightgreen.svg
 [pypi]: https://pypi.org/project/ojmicroline-thermostat/
 [python-versions-shield]: https://img.shields.io/pypi/pyversions/ojmicroline-thermostat
 [typing-shield]: https://github.com/robbinjanssen/python-ojmicroline-thermostat/actions/workflows/typing.yaml/badge.svg
