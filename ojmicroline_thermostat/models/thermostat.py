@@ -166,11 +166,12 @@ class Thermostat:
             online=data["Online"],
             heating=data["Heating"],
             regulation_mode=data["RegulationMode"],
+            # Not REGULATION_VACATION: setting it without VacationEnabled and
+            # the vacation days has no effect on the thermostat.
             supported_regulation_modes=[
                 REGULATION_SCHEDULE,
                 REGULATION_COMFORT,
                 REGULATION_MANUAL,
-                REGULATION_VACATION,
             ],
             last_primary_mode_is_auto=data["LastPrimaryModeIsAuto"],
             temperature=data["Temperature"],

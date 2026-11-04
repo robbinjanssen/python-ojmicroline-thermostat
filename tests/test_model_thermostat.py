@@ -178,7 +178,6 @@ async def test_thermostat_from_json_wg4() -> None:
         REGULATION_SCHEDULE,
         REGULATION_COMFORT,
         REGULATION_MANUAL,
-        REGULATION_VACATION,
     ]
     assert thermostat.last_primary_mode_is_auto is False
     assert thermostat.min_temperature == 500
