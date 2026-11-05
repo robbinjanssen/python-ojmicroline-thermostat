@@ -187,6 +187,7 @@ async def test_thermostat_from_json_wg4() -> None:
     assert isinstance(thermostat.comfort_end_time, datetime)
     assert thermostat.comfort_temperature == 2000
     assert thermostat.manual_temperature == 2600
+    assert thermostat.energy_price == 0.25
     assert thermostat.vacation_mode is True
     assert thermostat.vacation_temperature == 600
     tzinfo = timezone(-timedelta(hours=6))
@@ -399,6 +400,7 @@ WG4_ONLY_FIELDS = [
     "set_point_temperature",
     "utc_offset",
     "load_watts",
+    "energy_price",
 ]
 
 WD5_ONLY_FIELDS = [
