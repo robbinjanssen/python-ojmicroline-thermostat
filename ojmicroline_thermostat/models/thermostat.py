@@ -74,6 +74,8 @@ class Thermostat:
     # WG4-only fields:
     utc_offset: timedelta | None = None
     load_watts: int | None = None
+    # The price per kWh used for the costs in the app (KwhCharge).
+    energy_price: float | None = None
 
     # WG5-only fields:
     building_id: str | None = None
@@ -191,6 +193,7 @@ class Thermostat:
             vacation_temperature=data["VacationTemperature"],
             utc_offset=datetime.strptime(tz_offset, "%z").utcoffset(),
             load_watts=parse_wg4_load(data),
+            energy_price=data.get("KwhCharge"),
         )
 
     @classmethod

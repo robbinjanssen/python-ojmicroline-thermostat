@@ -492,3 +492,60 @@ async def test_get_thermostats_rejected_twice(aresponses: ResponsesMockServer) -
 
         with pytest.raises(OJMicrolineUnauthorizedError):
             await client.get_thermostats()
+
+
+@pytest.mark.asyncio
+async def test_set_energy_price(aresponses: ResponsesMockServer) -> None:
+    """Test setting the energy price sends it as a string, like the web portal."""
+    requests: list[tuple[dict[str, str], Any]] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        requests.append((dict(request.query), await request.json()))
+        return aresponses.Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"Success": True}),
+        )
+
+    aresponses.add("ojmicroline.test.host", "/api/thermostat", "POST", handler)
+    async with aiohttp.ClientSession() as session:
+        thermostat = Thermostat.from_wg4_json(
+            json.loads(load_fixtures("wg4_thermostat.json"))
+        )
+        api = WG4API(host="ojmicroline.test.host", username="py", password="test")
+        api._session_id = "f00b4r"
+        OJMicroline(api=api, session=session)
+
+        assert await api.set_energy_price(thermostat, 0.0894) is True
+
+    assert requests == [
+        (
+            {"sessionid": "f00b4r", "serialnumber": "42424242"},
+            {"KwhCharge": "0.0894"},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_set_energy_price_failed(aresponses: ResponsesMockServer) -> None:
+    """Test a refused energy price raises an error."""
+    aresponses.add(
+        "ojmicroline.test.host",
+        "/api/thermostat",
+        "POST",
+        Response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            text=json.dumps({"Success": False}),
+        ),
+    )
+    async with aiohttp.ClientSession() as session:
+        thermostat = Thermostat.from_wg4_json(
+            json.loads(load_fixtures("wg4_thermostat.json"))
+        )
+        api = WG4API(host="ojmicroline.test.host", username="py", password="test")
+        api._session_id = "f00b4r"
+        OJMicroline(api=api, session=session)
+
+        with pytest.raises(OJMicrolineError):
+            await api.set_energy_price(thermostat, 0.25)

@@ -10,7 +10,7 @@ from typing import Any
 from aiohttp import hdrs
 
 from .const import REGULATION_COMFORT, REGULATION_MANUAL
-from .exceptions import OJMicrolineResultsError
+from .exceptions import OJMicrolineError, OJMicrolineResultsError
 from .models import Thermostat
 from .ojmicroline import SessionOJMicrolineAPI
 
@@ -188,6 +188,41 @@ class WG4API(SessionOJMicrolineAPI):
 
     def parse_update_regulation_mode_response(self, data: Any) -> bool:  # noqa: D102
         return bool(data["Success"])
+
+    async def set_energy_price(self, resource: Thermostat, price: float) -> bool:
+        """Set the price per kWh that the app uses to show the energy costs.
+
+        The cloud applies the price to all stored usage, including earlier
+        days, so the costs in the app are only right for a constant price.
+
+        Args:
+        ----
+            resource: The Thermostat model.
+            price: The price per kWh; the cloud keeps four decimal places.
+
+        Returns:
+        -------
+            True if it succeeded.
+
+        Raises:
+        ------
+            OJMicrolineError: The cloud refused the price.
+
+        """
+        data = await self.request(
+            self.update_regulation_mode_path,
+            method=hdrs.METH_POST,
+            params={
+                "sessionid": self._session_id,
+                **self.update_regulation_mode_params(resource),
+            },
+            # The web portal sends the price as a string.
+            body={"KwhCharge": f"{price:.4f}"},
+        )
+        if not self.parse_update_regulation_mode_response(data):
+            msg = "Unable to set the energy price."
+            raise OJMicrolineError(msg)
+        return True
 
     supports_notifications: bool = True
 

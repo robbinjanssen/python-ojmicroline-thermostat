@@ -87,6 +87,7 @@ These fields are only available on WG4-series thermostats; for others, they may 
 | :------- | :--- | :---------- |
 | `utc_offset` | timedelta | The offset of the thermostat's time zone from UTC. |
 | `load_watts` | integer | The load of the heating element in W, either measured by the thermostat or set manually during installation. Avoid using this directly; instead, call the `get_current_power()` method. |
+| `energy_price` | float | The price per kWh that the app uses to show the energy costs (`KwhCharge`). |
 
 These fields are only available on WG5-series thermostats; for others, they may be `None`:
 
@@ -130,6 +131,11 @@ Keep in mind that certain thermostats only support a subset of these modes; be s
 | `set_regulation_mode` | `resource: Thermostat`, `regulation_mode: int`, `temperature: int \| None = None`, `duration: int = COMFORT_DURATION` | Set the regulation mode based on the input.<br> - `resource`: An instance of a Thermostat model returned by `get_thermostats()`<br> - `regulation_mode`: An integer representing the regulation mode, see "Regulation modes"<br> - `temperature`: An integer representing the temperature, eg: 2500. Only useful when setting the regulation mode to manual or comfort.<br> - `duration`: The duration in minutes to set the temperature for; only applies to comfort mode. |
 | `get_current_energy` | None | Return the current energy usage in kWh. This is the first value in the `energy` property list. |
 | `get_current_power` | None | Return the current power draw of the heating in W: the load while heating, and zero otherwise. Returns `None` if the load is unknown (only WG4-series thermostats report it). |
+
+### WG4API
+| Method | Params | Description |
+| :------- | :--- | :---------- |
+| `set_energy_price` | `resource: Thermostat`, `price: float` | Set the price per kWh that the app uses to show the energy costs (four decimal places). The cloud applies the price to all stored usage, including earlier days. Requires a session (call `OJMicroline.login()` first). |
 
 ## Usage
 
