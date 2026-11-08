@@ -496,7 +496,7 @@ async def test_get_thermostats_rejected_twice(aresponses: ResponsesMockServer) -
 
 @pytest.mark.asyncio
 async def test_set_energy_price(aresponses: ResponsesMockServer) -> None:
-    """Test setting the energy price sends it as a string, like the web portal."""
+    """Test the energy price is sent as a string with two decimals."""
     requests: list[tuple[dict[str, str], Any]] = []
 
     async def handler(request: web.Request) -> web.Response:
@@ -521,7 +521,7 @@ async def test_set_energy_price(aresponses: ResponsesMockServer) -> None:
     assert requests == [
         (
             {"sessionid": "f00b4r", "serialnumber": "42424242"},
-            {"KwhCharge": "0.0894"},
+            {"KwhCharge": "0.09"},
         )
     ]
 

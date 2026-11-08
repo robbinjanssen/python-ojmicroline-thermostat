@@ -198,7 +198,9 @@ class WG4API(SessionOJMicrolineAPI):
         Args:
         ----
             resource: The Thermostat model.
-            price: The price per kWh; the cloud keeps four decimal places.
+            price: The price per kWh, rounded to two decimals: the cloud
+                accepts more, but the thermostat truncates the price to two
+                decimals at its next sync.
 
         Returns:
         -------
@@ -217,7 +219,7 @@ class WG4API(SessionOJMicrolineAPI):
                 **self.update_regulation_mode_params(resource),
             },
             # The web portal sends the price as a string.
-            body={"KwhCharge": f"{price:.4f}"},
+            body={"KwhCharge": f"{price:.2f}"},
         )
         if not self.parse_update_regulation_mode_response(data):
             msg = "Unable to set the energy price."
