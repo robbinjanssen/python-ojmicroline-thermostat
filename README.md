@@ -135,7 +135,7 @@ Keep in mind that certain thermostats only support a subset of these modes; be s
 ### WG4API
 | Method | Params | Description |
 | :------- | :--- | :---------- |
-| `set_energy_price` | `resource: Thermostat`, `price: float` | Set the price per kWh that the app uses to show the energy costs (four decimal places). The cloud applies the price to all stored usage, including earlier days. Requires a session (call `OJMicroline.login()` first). |
+| `set_energy_price` | `resource: Thermostat`, `price: float` | Set the price per kWh that the app uses to show the energy costs, rounded to two decimals (the thermostat keeps two). The cloud applies the price to all stored usage, including earlier days. Requires a session (call `OJMicroline.login()` first). |
 
 ## Usage
 
