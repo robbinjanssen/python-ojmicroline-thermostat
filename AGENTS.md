@@ -19,6 +19,9 @@ ojmicroline_thermostat/
   wd5.py           WD5API: WD5 series (OWD5, MWD5), session API
   wg4.py           WG4API: WG4 series (UWG4, AWG4), session API, push long-poll
   wg5.py           WG5API: WG5 series (UWG5), OAuth2 API
+  gateway/         local device gateway for the WG4 series, adapted from
+                   schluter-local (MIT, see gateway/LICENSE): protobuf wire
+                   format, device messages and DeviceProfile
   models/          Thermostat and Schedule dataclasses, parsed per series
   exceptions.py    public exceptions
   const.py         regulation modes and other constants
