@@ -280,6 +280,122 @@ thermostat. Notifications are queued per session, so the listener receives
 every thermostat once when the subscription starts and again whenever the
 client has to log in again.
 
+### Local gateway (WG4, experimental)
+
+A WG4-series thermostat keeps a connection open to OJ's device gateway,
+`na-thermos.ojelectronics.com` on port 9533, and does not check that gateway's
+certificate. If a DNS record on your network points that hostname at the
+machine that runs this library, the thermostat connects to a `WG4Gateway`
+instead. `WG4LocalAPI` then reads and sets the thermostat without the cloud.
+
+So far this has only run against a simulated thermostat. Treat it as
+experimental until it is confirmed on real hardware.
+
+The gateway has two modes:
+
+| Mode | What the gateway does | The vendor's app |
+| :--- | :-------------------- | :--------------- |
+| `GatewayMode.RELAY` | Passes the connection on to OJ's gateway, and records the answers OJ's gateway gives the thermostat as its profile. When OJ's gateway cannot be used, a thermostat that has a profile is answered locally. | Keeps working |
+| `GatewayMode.LOCAL` | Answers the thermostat with its recorded profile. OJ's gateway is never contacted. | Shows the thermostat offline |
+
+A thermostat needs a profile before it can be answered locally, so start in
+relay mode. The schedule and manual modes are set on the thermostat directly.
+Other modes and the energy usage still go through the cloud API, which only
+reaches a thermostat that is relayed.
+
+```python
+import asyncio
+import json
+from pathlib import Path
+
+from ojmicroline_thermostat import (
+    DeviceProfile,
+    GatewayMode,
+    OJMicroline,
+    Thermostat,
+    WG4API,
+    WG4Gateway,
+    WG4LocalAPI,
+    server_ssl_context,
+)
+
+STORE = Path("gateway.json")
+
+
+def on_update(thermostat: Thermostat) -> None:
+    print(f"{thermostat.name}: {thermostat.get_current_temperature() / 100}°C")
+
+
+async def main():
+    stored = json.loads(STORE.read_text()) if STORE.exists() else {}
+
+    def save_snapshot(snapshot):
+        stored["snapshot"] = snapshot
+        STORE.write_text(json.dumps(stored))
+
+    def save_profile(serial, profile):
+        stored.setdefault("profiles", {})[serial] = profile.to_dict()
+        STORE.write_text(json.dumps(stored))
+
+    # The thermostat accepts any certificate, so a self-signed one will do:
+    # openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+    #     -subj /CN=na-thermos.ojelectronics.com \
+    #     -keyout gateway.key -out gateway.crt
+    context = await asyncio.to_thread(server_ssl_context, "gateway.crt", "gateway.key")
+    gateway = WG4Gateway(
+        context,
+        mode=GatewayMode.RELAY,
+        profiles={
+            serial: DeviceProfile.from_dict(profile)
+            for serial, profile in stored.get("profiles", {}).items()
+        },
+    )
+    gateway.on_profile = save_profile
+    api = WG4LocalAPI(
+        WG4API(username="<your-username>", password="<your-password>"),
+        gateway,
+        snapshot=stored.get("snapshot"),
+        on_snapshot=save_snapshot,
+    )
+
+    async with OJMicroline(api=api) as client:
+        # The gateway only accepts the thermostats of the account, so fetch
+        # them before it starts.
+        await client.get_thermostats()
+        await gateway.start()
+        unsubscribe = client.subscribe(on_update)
+        await asyncio.sleep(600)
+        unsubscribe()
+        await gateway.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Three things are yours to store: the certificate, the profile of each
+thermostat (`on_profile`) and the snapshot (`on_snapshot`). The snapshot is the
+last answer of the cloud API, which keeps the thermostats usable when the cloud
+cannot be reached. It holds the email address of the account.
+
+| Member | Description |
+| :----- | :---------- |
+| `WG4Gateway.start()`, `stop()` | Start and stop listening. The port is `9533` unless `listen_port` says otherwise. |
+| `WG4Gateway.connected` | The serial numbers of the thermostats that are connected. |
+| `WG4Gateway.is_relayed(serial)` | Whether a thermostat is connected to OJ's gateway as well. |
+| `WG4Gateway.on_upstream`, `upstream_status` | Whether OJ's gateway can be used. `UpstreamStatus.UNTRUSTED` means its certificate does not match the pinned fingerprint; nothing is sent to it then. |
+| `WG4LocalAPI.cloud_error` | Why the cloud API could not be used when the thermostats were last fetched, or `None`. |
+| `WG4LocalAPI.cloud` | The `WG4API`, for cloud-only calls such as `set_energy_price`. |
+
+Every device on your network can reach the gateway's port. The gateway only
+serves the serial numbers of the account, but a serial number is not a secret:
+run it on a network you trust.
+
+The protocol between thermostat and gateway is described in
+[docs/device-protocol.md](docs/device-protocol.md). It was worked out by
+[peskyAdmin/schluter-local](https://github.com/peskyAdmin/schluter-local),
+from which the gateway is adapted.
+
 ## Contributing
 
 This is an active open-source project. We are always open to people who want to

@@ -68,6 +68,29 @@ class WG4API(SessionOJMicrolineAPI):
 
         return results
 
+    async def get_thermostats_json(self) -> dict[str, dict[str, Any]]:
+        """Fetch the thermostats as the API returns them, without energy usage.
+
+        This is what Thermostat.from_wg4_json() takes. It includes the email
+        address of the account.
+
+        Returns
+        -------
+            The JSON of each thermostat, by serial number.
+
+        """
+        data = await self.request(
+            self.get_thermostats_path,
+            method=hdrs.METH_GET,
+            params={"sessionid": self._session_id},
+        )
+        return {
+            str(item["SerialNumber"]): item
+            for group in data["Groups"]
+            for item in group["Thermostats"]
+            if len(item)
+        }
+
     get_energy_usage_path: str = "api/energyusage"
 
     def parse_energy_usage_response(self, data: Any) -> list[float]:
