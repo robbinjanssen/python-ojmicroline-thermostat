@@ -13,7 +13,11 @@ from .profile import DeviceProfile
 from .server import (
     WG4_NORTH_AMERICA,
     GatewayEndpoint,
+    GatewayMode,
+    ProfileListener,
     StateListener,
+    UpstreamListener,
+    UpstreamStatus,
     WG4Gateway,
     server_ssl_context,
 )
@@ -22,7 +26,11 @@ __all__ = [
     "WG4_NORTH_AMERICA",
     "DeviceProfile",
     "GatewayEndpoint",
+    "GatewayMode",
+    "ProfileListener",
     "StateListener",
+    "UpstreamListener",
+    "UpstreamStatus",
     "WG4Gateway",
     "server_ssl_context",
 ]
