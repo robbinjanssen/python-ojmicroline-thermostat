@@ -21,7 +21,8 @@ ojmicroline_thermostat/
   wg5.py           WG5API: WG5 series (UWG5), OAuth2 API
   gateway/         local device gateway for the WG4 series, adapted from
                    schluter-local (MIT, see gateway/LICENSE): protobuf wire
-                   format, device messages and DeviceProfile
+                   format, device messages, DeviceProfile and the WG4Gateway
+                   listener; its tests run a fake thermostat over real TLS
   models/          Thermostat and Schedule dataclasses, parsed per series
   exceptions.py    public exceptions
   const.py         regulation modes and other constants

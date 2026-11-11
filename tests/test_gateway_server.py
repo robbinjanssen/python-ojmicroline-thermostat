@@ -1,0 +1,766 @@
+"""Test the gateway that WG4-series thermostats connect to.
+
+A fake thermostat talks to a real gateway over TLS on the loopback interface.
+Like the real one, it does not check the gateway's certificate.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import ssl
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
+
+import pytest
+import trustme
+
+from ojmicroline_thermostat import (
+    OJMicrolineConnectionError,
+    OJMicrolineError,
+    OJMicrolineTimeoutError,
+)
+from ojmicroline_thermostat.gateway import (
+    WG4_NORTH_AMERICA,
+    DeviceProfile,
+    WG4Gateway,
+    server_ssl_context,
+)
+from ojmicroline_thermostat.gateway import server as gateway_server
+from ojmicroline_thermostat.gateway.protobuf import (
+    MAX_FRAME,
+    Message,
+    encode_field,
+    encode_frame,
+    encode_varint,
+)
+from ojmicroline_thermostat.gateway.server import read_frame
+
+from .test_gateway_wg4 import TELEMETRY, WALL_STATE
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+    from pathlib import Path
+
+SERIAL = "1234567"
+
+# The two answers of OJ's gateway, with made-up content.
+PROFILE = DeviceProfile(
+    configuration=encode_frame(
+        encode_field(1, 1) + encode_field(5, 1) + encode_field(10, encode_field(1, 1))
+    ),
+    support=encode_frame(
+        encode_field(1, 0) + encode_field(5, 1) + encode_field(18, b"Example support")
+    ),
+)
+
+# What a thermostat sends after it connected: its login, the upload of its
+# schedule and settings, and the full upload with its state. Setpoints are in
+# 1/200 °C: a temporary hold at 16.66 °C and a permanent one at 22.22 °C.
+STATE = (
+    encode_field(1, 1000)
+    + encode_field(2, 3)
+    + encode_field(4, encode_field(1, 3332))
+    + encode_field(5, encode_field(1, 4444))
+    + encode_field(6, 0)
+)
+SCHEDULE = b"\x08\x01"
+SCHEDULE_UPLOAD = encode_field(1, 30) + encode_field(2, 6)
+STATE_UPLOAD = (
+    encode_field(1, 31)
+    + encode_field(2, 4)
+    + encode_field(5, 1)
+    + encode_field(7, encode_field(2, b"Kitchen Floor"))
+    + encode_field(8, SCHEDULE)
+    + encode_field(9, STATE)
+)
+UPLOADED = {
+    "RegulationMode": 3,
+    "ComfortTemperature": 1666,
+    "ManualTemperature": 2222,
+    "SetPointTemp": 2222,
+    "Room": "Kitchen Floor",
+}
+
+Events = list[tuple[str, dict[str, Any]]]
+
+
+def _login(serial: str = SERIAL) -> bytes:
+    """Build a login like the thermostat's, with a made-up email address."""
+    account = (
+        encode_field(1, b"user@example.com")
+        + encode_field(2, serial.encode())
+        + encode_field(3, 10207)
+    )
+    return encode_field(1, 29) + encode_field(5, 1) + encode_field(6, account)
+
+
+def _acknowledgement(sequence: int, accepted: int = 1) -> bytes:
+    """Build the thermostat's answer to a command."""
+    return encode_field(1, sequence) + encode_field(3, accepted)
+
+
+async def _until(condition: Callable[[], bool]) -> None:
+    """Wait until the gateway has caught up with what a thermostat did."""
+    async with asyncio.timeout(2):
+        while not condition():  # noqa: ASYNC110 - there is no event to wait for
+            await asyncio.sleep(0.005)
+
+
+class FakeThermostat:
+    """The thermostat's side of a connection to the gateway."""
+
+    def __init__(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        """Wrap an open connection."""
+        self._reader = reader
+        self._writer = writer
+
+    async def send(self, message: bytes) -> None:
+        """Send a message in a frame."""
+        await self.send_raw(encode_frame(message))
+
+    async def send_raw(self, data: bytes) -> None:
+        """Send bytes as they are."""
+        self._writer.write(data)
+        await self._writer.drain()
+
+    async def receive_frame(self) -> bytes:
+        """Wait for the next frame of the gateway and return it whole."""
+        async with asyncio.timeout(2):
+            return encode_frame(await read_frame(self._reader))
+
+    async def receive(self) -> Message:
+        """Wait for the next message of the gateway."""
+        async with asyncio.timeout(2):
+            return Message.parse(await read_frame(self._reader))
+
+    async def login(self, serial: str = SERIAL) -> Message:
+        """Log in and return the gateway's answer."""
+        await self.send(_login(serial))
+        return await self.receive()
+
+    async def upload(self) -> None:
+        """Upload the schedule and the state, as a thermostat does after login."""
+        await self.send(SCHEDULE_UPLOAD)
+        await self.receive()
+        await self.receive()
+        await self.send(STATE_UPLOAD)
+        await self.receive()
+        await self.receive()
+
+    async def was_closed(self) -> bool:
+        """Tell whether the gateway closed the connection without sending more."""
+        async with asyncio.timeout(2):
+            return await self._reader.read(1) == b""
+
+    async def close(self) -> None:
+        """Hang up."""
+        self._writer.close()
+        # The gateway may have hung up first, which is fine.
+        with contextlib.suppress(ConnectionError, ssl.SSLError, TimeoutError):
+            async with asyncio.timeout(2):
+                await self._writer.wait_closed()
+
+
+@pytest.fixture(scope="session", name="certificate")
+def certificate_fixture(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    """Create a certificate and its key, as the user of the gateway supplies."""
+    directory = tmp_path_factory.mktemp("certificate")
+    authority = trustme.CA(key_type=trustme.KeyType.RSA)
+    issued = authority.issue_cert(WG4_NORTH_AMERICA.host, key_type=trustme.KeyType.RSA)
+    certfile = directory / "gateway.crt"
+    keyfile = directory / "gateway.key"
+    issued.cert_chain_pems[0].write_to_path(certfile)
+    issued.private_key_pem.write_to_path(keyfile)
+    return certfile, keyfile
+
+
+@pytest.fixture(name="events")
+def events_fixture() -> Events:
+    """Collect what the gateway reports about its thermostats."""
+    return []
+
+
+@pytest.fixture(name="gateway")
+async def gateway_fixture(
+    certificate: tuple[Path, Path], events: Events
+) -> AsyncIterator[WG4Gateway]:
+    """Run a gateway on a free port that serves one thermostat."""
+    gateway = WG4Gateway(
+        server_ssl_context(*certificate),
+        endpoint=replace(WG4_NORTH_AMERICA, port=0),
+        profiles={SERIAL: PROFILE},
+        listen_host="127.0.0.1",
+    )
+    gateway.allowed_serials = {SERIAL}
+    gateway.on_state = lambda serial, fields: events.append((serial, fields))
+    await gateway.start()
+    yield gateway
+    await gateway.stop()
+
+
+@pytest.fixture(name="connect")
+async def connect_fixture(
+    gateway: WG4Gateway,
+) -> AsyncIterator[Callable[[], Any]]:
+    """Connect fake thermostats to the gateway, and hang up afterwards."""
+    thermostats: list[FakeThermostat] = []
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
+    async def connect() -> FakeThermostat:
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", gateway.port, ssl=context
+        )
+        thermostat = FakeThermostat(reader, writer)
+        thermostats.append(thermostat)
+        return thermostat
+
+    yield connect
+    for thermostat in thermostats:
+        await thermostat.close()
+
+
+async def _connected(connect: Callable[[], Any]) -> FakeThermostat:
+    """Connect a thermostat that has logged in and uploaded its state."""
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    await thermostat.upload()
+    return thermostat
+
+
+async def test_read_frame() -> None:
+    """Frames are read from a stream one by one."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(encode_frame(b"abc") + encode_frame(bytes(200)))
+    assert await read_frame(reader) == b"abc"
+    assert await read_frame(reader) == bytes(200)
+
+    reader.feed_data(b"\x08\x05ab")
+    reader.feed_eof()
+    with pytest.raises(asyncio.IncompleteReadError):
+        await read_frame(reader)
+
+
+@pytest.mark.parametrize(
+    ("data", "error"),
+    [
+        (b"\x09", "starts with 0x08, not with 0x09"),
+        (b"\x08\xff\xff\xff\x7f", "at most 3 bytes"),
+        (b"\x08" + encode_varint(MAX_FRAME + 1), "exceeds the limit"),
+    ],
+)
+async def test_read_frame_rejects_bad_frame(data: bytes, error: str) -> None:
+    """Data that is not a frame of a sane size is refused."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(data)
+    with pytest.raises(ValueError, match=error):
+        await read_frame(reader)
+
+
+async def test_start_and_stop(certificate: tuple[Path, Path]) -> None:
+    """The gateway listens between start() and stop(), and both can repeat."""
+    gateway = WG4Gateway(
+        server_ssl_context(*certificate),
+        endpoint=replace(WG4_NORTH_AMERICA, port=0),
+        listen_host="127.0.0.1",
+    )
+    assert gateway.port is None
+    await gateway.stop()
+
+    await gateway.start()
+    port = gateway.port
+    assert port
+    await gateway.start()
+    assert gateway.port == port
+
+    await gateway.stop()
+    assert gateway.port is None
+    await gateway.stop()
+
+
+async def test_start_fails_when_the_port_is_taken(
+    gateway: WG4Gateway, certificate: tuple[Path, Path]
+) -> None:
+    """A second gateway on the same port reports why it cannot start."""
+    assert gateway.port is not None
+    second = WG4Gateway(
+        server_ssl_context(*certificate),
+        endpoint=replace(WG4_NORTH_AMERICA, port=gateway.port),
+        listen_host="127.0.0.1",
+    )
+    with pytest.raises(OJMicrolineConnectionError, match="Unable to listen on port"):
+        await second.start()
+    assert second.port is None
+
+
+def test_default_endpoint() -> None:
+    """Without an endpoint the gateway stands in for the North American one."""
+    gateway = WG4Gateway(ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER))
+    assert gateway.endpoint.host == "na-thermos.ojelectronics.com"
+    assert gateway.endpoint.port == 9533
+    assert not gateway.allowed_serials
+    assert not gateway.profiles
+    assert not gateway.connected
+
+
+async def test_thermostat_cipher_suite(gateway: WG4Gateway) -> None:
+    """The gateway accepts the kind of TLS connection the thermostat makes.
+
+    The thermostat speaks TLS 1.2 with RSA key exchange, which current defaults
+    put last or leave out.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    context.maximum_version = ssl.TLSVersion.TLSv1_2
+    try:
+        context.set_ciphers("AES256-SHA256")
+    except ssl.SSLError:
+        pytest.skip("This OpenSSL build cannot connect the way the thermostat does")
+
+    reader, writer = await asyncio.open_connection(
+        "127.0.0.1", gateway.port, ssl=context
+    )
+    thermostat = FakeThermostat(reader, writer)
+    try:
+        assert writer.get_extra_info("cipher")[0] == "AES256-SHA256"
+        assert (await thermostat.login()).varint(3) == 1
+    finally:
+        await thermostat.close()
+
+
+async def test_session(
+    gateway: WG4Gateway, events: Events, connect: Callable[[], Any]
+) -> None:
+    """The gateway answers a thermostat the way OJ's gateway does."""
+    thermostat: FakeThermostat = await connect()
+
+    # The login is acknowledged with the server time.
+    answer = await thermostat.login()
+    assert answer.numbers == {1, 3, 4, 12}
+    assert answer.varint(1) == 29
+    assert answer.varint(3) == 1
+    assert gateway.connected == {SERIAL}
+    assert events == [(SERIAL, {"Online": True})]
+
+    # The schedule upload is acknowledged, followed by the support answer.
+    await thermostat.send(SCHEDULE_UPLOAD)
+    assert await thermostat.receive_frame() == encode_frame(_acknowledgement(30))
+    assert await thermostat.receive_frame() == PROFILE.support
+
+    # The full upload is acknowledged, followed by the configuration answer.
+    await thermostat.send(STATE_UPLOAD)
+    assert await thermostat.receive_frame() == encode_frame(_acknowledgement(31))
+    assert await thermostat.receive_frame() == PROFILE.configuration
+    assert events[-1] == (SERIAL, UPLOADED)
+
+    # A heartbeat and a change at the wall are acknowledged and passed on.
+    await thermostat.send(TELEMETRY)
+    assert (await thermostat.receive()).varint(1) == 403
+    assert events[-1] == (SERIAL, {"Temperature": 2033, "Heating": False})
+
+    await thermostat.send(WALL_STATE)
+    assert (await thermostat.receive()).varint(1) == 406
+    assert events[-1] == (
+        SERIAL,
+        {
+            "RegulationMode": 2,
+            "ComfortTemperature": 2166,
+            "ManualTemperature": 1444,
+            "SetPointTemp": 2166,
+        },
+    )
+
+
+async def test_messages_without_an_answer(
+    events: Events, connect: Callable[[], Any]
+) -> None:
+    """Only a message with a sequence number is acknowledged."""
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    seen = len(events)
+
+    # Without a sequence number, and the thermostat's own acknowledgement of
+    # a message it got: neither is answered, and neither says anything.
+    await thermostat.send(encode_field(20, 1))
+    await thermostat.send(_acknowledgement(0))
+    await thermostat.send(_acknowledgement(999))
+    # An unknown message with a sequence number is acknowledged.
+    await thermostat.send(encode_field(1, 55) + encode_field(20, 1))
+
+    answer = await thermostat.receive()
+    assert answer.varint(1) == 55
+    assert answer.varint(3) == 1
+    assert len(events) == seen
+
+
+async def test_disconnect(
+    gateway: WG4Gateway, events: Events, connect: Callable[[], Any]
+) -> None:
+    """A thermostat that hangs up is reported offline."""
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    await thermostat.close()
+
+    await _until(lambda: not gateway.connected)
+    assert events == [(SERIAL, {"Online": True}), (SERIAL, {"Online": False})]
+
+
+async def test_reconnect_replaces_the_old_connection(
+    gateway: WG4Gateway, events: Events, connect: Callable[[], Any]
+) -> None:
+    """A thermostat that connects again stays online on its new connection."""
+    first: FakeThermostat = await connect()
+    await first.login()
+    second: FakeThermostat = await connect()
+    await second.login()
+
+    assert await first.was_closed()
+    await second.send(TELEMETRY)
+    assert (await second.receive()).varint(1) == 403
+    assert gateway.connected == {SERIAL}
+    # The thermostat never went offline in between.
+    assert (SERIAL, {"Online": False}) not in events
+
+
+async def test_stop_disconnects_thermostats(
+    gateway: WG4Gateway, events: Events, connect: Callable[[], Any]
+) -> None:
+    """Stopping the gateway hangs up on thermostats, logged in or not."""
+    waiting: FakeThermostat = await connect()
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+
+    await gateway.stop()
+
+    assert await thermostat.was_closed()
+    assert await waiting.was_closed()
+    assert not gateway.connected
+    assert events[-1] == (SERIAL, {"Online": False})
+
+
+@pytest.mark.parametrize(
+    "first",
+    [
+        TELEMETRY,
+        # A login without a serial number.
+        encode_field(1, 9) + encode_field(6, b""),
+    ],
+)
+async def test_first_message_must_be_a_login(
+    first: bytes, gateway: WG4Gateway, events: Events, connect: Callable[[], Any]
+) -> None:
+    """Nothing is answered before a thermostat said who it is."""
+    thermostat: FakeThermostat = await connect()
+    await thermostat.send(first)
+
+    assert await thermostat.was_closed()
+    assert not gateway.connected
+    assert not events
+
+
+async def test_unknown_thermostat_is_refused(
+    gateway: WG4Gateway, events: Events, connect: Callable[[], Any]
+) -> None:
+    """A thermostat that is not allowed, or has no profile, gets no answer."""
+    stranger: FakeThermostat = await connect()
+    await stranger.send(_login("7654321"))
+    assert await stranger.was_closed()
+
+    gateway.allowed_serials.add("7654321")
+    without_profile: FakeThermostat = await connect()
+    await without_profile.send(_login("7654321"))
+    assert await without_profile.was_closed()
+
+    assert not gateway.connected
+    assert not events
+
+
+async def test_second_login_is_refused(
+    gateway: WG4Gateway, connect: Callable[[], Any]
+) -> None:
+    """A connection belongs to one thermostat; it cannot log in again."""
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    await thermostat.send(_login())
+
+    assert await thermostat.was_closed()
+    await _until(lambda: not gateway.connected)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"\x09",
+        b"\x08\xff\xff\xff\x7f",
+        b"\x08" + encode_varint(MAX_FRAME + 1),
+        encode_frame(b"\x00"),
+        # A state that is not a message.
+        encode_frame(encode_field(1, 5) + encode_field(9, b"\x00")),
+    ],
+)
+async def test_malformed_input_closes_the_connection(
+    data: bytes,
+    gateway: WG4Gateway,
+    connect: Callable[[], Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A thermostat that sends nonsense is dropped, and the gateway goes on."""
+    caplog.set_level(logging.DEBUG)
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    await thermostat.send_raw(data)
+
+    assert await thermostat.was_closed()
+    await _until(lambda: not gateway.connected)
+    assert "malformed message" in caplog.text
+
+    again: FakeThermostat = await connect()
+    await again.login()
+    assert gateway.connected == {SERIAL}
+
+
+async def test_unexpected_error_closes_the_connection(
+    gateway: WG4Gateway,
+    connect: Callable[[], Any],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bug in handling one thermostat does not take the gateway down."""
+
+    def broken(_message: Message) -> dict[str, Any]:
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(gateway_server, "decode_telemetry", broken)
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    await thermostat.send(TELEMETRY)
+
+    assert await thermostat.was_closed()
+    await _until(lambda: not gateway.connected)
+    assert "Unexpected error in the connection of a thermostat" in caplog.text
+
+
+async def test_login_has_to_come_in_time(
+    connect: Callable[[], Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A connection that never logs in is closed."""
+    monkeypatch.setattr(gateway_server, "LOGIN_TIMEOUT", 0.05)
+    thermostat: FakeThermostat = await connect()
+
+    assert await thermostat.was_closed()
+
+
+async def test_quiet_thermostat_is_disconnected(
+    gateway: WG4Gateway,
+    events: Events,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without heartbeats the link is dead, and the thermostat is offline."""
+    monkeypatch.setattr(gateway_server, "IDLE_TIMEOUT", 0.05)
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+
+    assert await thermostat.was_closed()
+    await _until(lambda: not gateway.connected)
+    assert events[-1] == (SERIAL, {"Online": False})
+
+
+async def test_listener_is_optional_and_may_fail(
+    gateway: WG4Gateway,
+    connect: Callable[[], Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The gateway keeps serving without a listener, and with a broken one."""
+
+    def broken(_serial: str, _fields: dict[str, Any]) -> None:
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    gateway.on_state = None
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+
+    gateway.on_state = broken
+    await thermostat.send(TELEMETRY)
+    assert (await thermostat.receive()).varint(1) == 403
+    assert "Error in the state listener of the gateway" in caplog.text
+
+
+async def test_set_mode(
+    gateway: WG4Gateway, events: Events, connect: Callable[[], Any]
+) -> None:
+    """A command is the thermostat's own state with the mode and setpoint set."""
+    thermostat = await _connected(connect)
+
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+    sent = await thermostat.receive()
+    assert sent.numbers == {1, 5, 8, 9}
+    assert sent.varint(1) == 101
+    assert sent.data(8) == SCHEDULE
+    state = sent.message(9)
+    assert state is not None
+    assert state.varint(2) == 3
+    # 22.5 °C is 4500 on the wire, in the field of the permanent hold. The
+    # temporary hold keeps its setpoint.
+    assert state.message(5) == Message.parse(encode_field(1, 4500))
+    assert state.message(4) == Message.parse(encode_field(1, 3332))
+    assert not task.done()
+
+    await thermostat.send(_acknowledgement(101))
+    await task
+    assert events[-1] == (
+        SERIAL,
+        {
+            "RegulationMode": 3,
+            "ComfortTemperature": 1666,
+            "ManualTemperature": 2250,
+            "SetPointTemp": 2250,
+        },
+    )
+
+    # The next command starts from the state the thermostat took over.
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 1))
+    sent = await thermostat.receive()
+    assert sent.varint(1) == 102
+    state = sent.message(9)
+    assert state is not None
+    assert state.varint(2) == 1
+    assert state.message(5) == Message.parse(encode_field(1, 4500))
+    await thermostat.send(_acknowledgement(102))
+    await task
+    assert events[-1][1]["RegulationMode"] == 1
+
+
+async def test_set_mode_one_at_a_time(
+    gateway: WG4Gateway, connect: Callable[[], Any]
+) -> None:
+    """A second command waits until the thermostat answered the first."""
+    thermostat = await _connected(connect)
+
+    first = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+    second = asyncio.create_task(gateway.set_mode(SERIAL, 2, 2000))
+    assert (await thermostat.receive()).varint(1) == 101
+    await thermostat.send(_acknowledgement(101))
+    await first
+
+    # The second command builds on the first: the permanent hold keeps 22.5 °C.
+    sent = await thermostat.receive()
+    assert sent.varint(1) == 102
+    state = sent.message(9)
+    assert state is not None
+    assert state.varint(2) == 2
+    assert state.message(4) == Message.parse(encode_field(1, 4000))
+    assert state.message(5) == Message.parse(encode_field(1, 4500))
+    await thermostat.send(_acknowledgement(102))
+    await second
+
+
+async def test_set_mode_needs_a_connected_thermostat(
+    gateway: WG4Gateway, connect: Callable[[], Any]
+) -> None:
+    """A command for a thermostat that cannot take it fails right away."""
+    with pytest.raises(OJMicrolineConnectionError, match="is not connected"):
+        await gateway.set_mode(SERIAL, 3, 2250)
+
+    # Connected, but the state to build the command from is not there yet.
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    with pytest.raises(OJMicrolineConnectionError, match="not reported its state"):
+        await gateway.set_mode(SERIAL, 3, 2250)
+
+
+async def test_set_mode_without_acknowledgement(
+    gateway: WG4Gateway,
+    events: Events,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A command the thermostat does not confirm fails, and changes nothing."""
+    monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 0.05)
+    thermostat = await _connected(connect)
+    seen = len(events)
+
+    with pytest.raises(OJMicrolineTimeoutError, match="did not acknowledge"):
+        await gateway.set_mode(SERIAL, 3, 2250)
+    assert (await thermostat.receive()).varint(1) == 101
+    assert len(events) == seen
+
+    # A late answer is ignored, and the next command starts from the state the
+    # thermostat reported: the permanent hold still has 22.22 °C.
+    await thermostat.send(_acknowledgement(101))
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 1))
+    sent = await thermostat.receive()
+    assert sent.varint(1) == 102
+    state = sent.message(9)
+    assert state is not None
+    assert state.message(5) == Message.parse(encode_field(1, 4444))
+    await thermostat.send(_acknowledgement(102))
+    await task
+
+
+async def test_set_mode_refused(
+    gateway: WG4Gateway, events: Events, connect: Callable[[], Any]
+) -> None:
+    """An answer that does not confirm the command is an error."""
+    thermostat = await _connected(connect)
+    seen = len(events)
+
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+    await thermostat.receive()
+    await thermostat.send(_acknowledgement(101, accepted=0))
+
+    with pytest.raises(OJMicrolineError, match="refused the command"):
+        await task
+    assert len(events) == seen
+
+
+async def test_closing_a_link_leaves_finished_commands_alone() -> None:
+    """Only commands that still wait are told that the thermostat is gone.
+
+    A command can time out in the same moment its thermostat disconnects; its
+    wait has ended by then, and failing it once more would be an error.
+    """
+    loop = asyncio.get_running_loop()
+    finished: asyncio.Future[bool] = loop.create_future()
+    finished.set_result(True)
+    waiting: asyncio.Future[bool] = loop.create_future()
+    writer = MagicMock(spec=asyncio.StreamWriter)
+    link = gateway_server._Link(  # pylint: disable=protected-access
+        SERIAL, writer, PROFILE, pending={101: finished, 102: waiting}
+    )
+
+    WG4Gateway._close(link)  # pylint: disable=protected-access
+
+    assert link.closed
+    assert finished.result() is True
+    with pytest.raises(ConnectionResetError, match="disconnected"):
+        waiting.result()
+    writer.close.assert_called_once_with()
+
+
+async def test_set_mode_when_the_thermostat_disconnects(
+    gateway: WG4Gateway, connect: Callable[[], Any]
+) -> None:
+    """Commands do not wait for a thermostat that hung up."""
+    thermostat = await _connected(connect)
+
+    first = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+    second = asyncio.create_task(gateway.set_mode(SERIAL, 1))
+    await thermostat.receive()
+    await thermostat.close()
+
+    with pytest.raises(OJMicrolineConnectionError, match="before it acknowledged"):
+        await first
+    # The second command waited for the first, and finds the connection gone.
+    with pytest.raises(OJMicrolineConnectionError, match="disconnected"):
+        await second
+    await _until(lambda: not gateway.connected)
