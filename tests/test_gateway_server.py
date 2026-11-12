@@ -227,6 +227,71 @@ async def test_session(
     )
 
 
+async def test_history(gateway: WG4Gateway, connect: Callable[[], Any]) -> None:
+    """The gateway keeps what happened, for a report of a real thermostat."""
+    thermostat = await _connected(connect)
+    await thermostat.send(TELEMETRY)
+    await thermostat.receive()
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+    await thermostat.receive()
+    await thermostat.send(acknowledgement(101))
+    await task
+
+    history = gateway.history
+    events = "\n".join(history)
+    assert f"The gateway listens on port {gateway.port} (local mode)" in events
+    assert "Connection from 127.0.0.1, secured with TLSv1." in events
+    assert f"Thermostat {SERIAL} logged in; it is answered locally" in events
+    assert (
+        f"Thermostat (thermostat {SERIAL}): seq=403 fields=1,5,15 "
+        "floor=20.33C/68.6F heating=0"
+    ) in events
+    assert f"Sending command 101 to thermostat {SERIAL}" in events
+    assert f"Thermostat {SERIAL} acknowledged command 101" in events
+    # Every line has its time, and a login never shows what is in it.
+    assert all(line[4] == "-" and line[13] == ":" for line in history)
+    assert "user@example.com" not in events
+
+
+async def test_history_is_bounded(
+    gateway: WG4Gateway, connect: Callable[[], Any]
+) -> None:
+    """The history keeps the latest events, not all of them."""
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    for _ in range(320):
+        await thermostat.send(TELEMETRY)
+        await thermostat.receive()
+
+    assert len(gateway.history) == 300
+    assert "logged in" not in "\n".join(gateway.history)
+
+
+async def test_failed_handshake_is_reported(gateway: WG4Gateway) -> None:
+    """A thermostat that does not get through TLS leaves a trace.
+
+    This is what shows when a thermostat refuses the gateway's certificate.
+    """
+    # A client that checks the certificate, which no authority vouches for.
+    with pytest.raises(ssl.SSLCertVerificationError):
+        await FakeThermostat.connect(gateway.port, ssl.create_default_context())
+    # A client that does not speak TLS at all.
+    reader, writer = await asyncio.open_connection("127.0.0.1", gateway.port)
+    writer.write(b"this is not TLS\r\n\r\n")
+    await writer.drain()
+    async with asyncio.timeout(2):
+        await reader.read()
+    writer.close()
+
+    await until(lambda: "\n".join(gateway.history).count("TLS handshake") == 2)
+    assert all(
+        "The TLS handshake with 127.0.0.1 failed: " in line
+        for line in gateway.history
+        if "TLS handshake" in line
+    )
+    assert not gateway.connected
+
+
 async def test_messages_without_an_answer(
     events: Events, connect: Callable[[], Any]
 ) -> None:
@@ -541,6 +606,7 @@ async def test_set_mode_without_acknowledgement(
 
     with pytest.raises(OJMicrolineTimeoutError, match="did not acknowledge"):
         await gateway.set_mode(SERIAL, 3, 2250)
+    assert f"Thermostat {SERIAL} did not answer command 101" in gateway.history[-1]
     assert (await thermostat.receive()).varint(1) == 101
     assert len(events) == seen
 
@@ -570,6 +636,7 @@ async def test_set_mode_refused(
 
     with pytest.raises(OJMicrolineError, match="refused the command"):
         await task
+    assert f"Thermostat {SERIAL} refused command 101" in gateway.history[-1]
     assert len(events) == seen
 
 

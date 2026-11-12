@@ -171,6 +171,12 @@ async def test_relayed_session(  # noqa: PLR0913, PLR0917 # pylint: disable=too-
     await until(lambda: bool(recorded))
     assert recorded == [(SERIAL, CLOUD_PROFILE)]
     assert gateway.profiles == {SERIAL: CLOUD_PROFILE}
+    # The history shows what OJ's gateway sent, which answers how it behaves.
+    history = "\n".join(gateway.history)
+    assert f"Thermostat {SERIAL} logged in; it is relayed to OJ's gateway" in history
+    assert f"OJ's gateway (thermostat {SERIAL}): seq=1 fields=1,5,10" in history
+    assert f"OJ's gateway (thermostat {SERIAL}): seq=0 fields=1,5,18" in history
+    assert f"Recorded the profile of thermostat {SERIAL}" in history
 
     # What the thermostat reports goes to OJ's gateway and to the listener.
     await thermostat.send(TELEMETRY)
@@ -389,6 +395,10 @@ async def test_untrusted_gateway_gets_nothing(  # noqa: PLR0913, PLR0917 # pylin
     assert await thermostat.was_closed()
     assert statuses == [UpstreamStatus.UNTRUSTED]
     assert "does not match the pin" in caplog.text
+    # The fingerprint that was seen is what a new pin would have to be.
+    assert gateway.upstream_fingerprint == cloud.fingerprint
+    assert f"Its SHA-256 fingerprint is {cloud.fingerprint}" in caplog.text
+    assert f"fingerprint is {cloud.fingerprint}" in "\n".join(gateway.history)
 
     # With a profile it is answered locally.
     gateway.profiles[SERIAL] = PROFILE
@@ -421,6 +431,9 @@ async def test_thermostat_is_answered_locally_while_ojs_gateway_is_down(
     await thermostat.send(login())
     assert await thermostat.was_closed()
     assert statuses == [UpstreamStatus.UNREACHABLE]
+    events = "\n".join(gateway.history)
+    assert "OJ's gateway at 127.0.0.1 cannot be used: " in events
+    assert f"Refusing thermostat {SERIAL}: it has no profile" in events
 
     gateway.profiles[SERIAL] = PROFILE
     again: FakeThermostat = await connect()

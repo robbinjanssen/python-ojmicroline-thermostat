@@ -85,6 +85,8 @@ work on a branch.
     every byte that is not understood goes back as the thermostat sent it.
   - A login holds the account's email address. Never log or store it;
     `describe()` is the only way a message reaches a log.
+  - Report what happens on a connection with `WG4Gateway._event()`, which
+    logs it and keeps it in `history` for a report from a real thermostat.
   - Nothing is sent to OJ's gateway before its certificate matched the pin.
   - A cloud failure must not stop or delay a thermostat on the gateway, which
     is why `WG4LocalAPI.login()` does nothing.

@@ -22,10 +22,12 @@ import contextlib
 import hashlib
 import logging
 import ssl
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ojmicroline_thermostat.exceptions import (
     OJMicrolineConnectionError,
@@ -82,6 +84,8 @@ _FIRST_SEQUENCE = 101
 # The length of a frame of at most MAX_FRAME bytes fits in three bytes.
 _MAX_LENGTH_BYTES = 3
 _STOP_TIMEOUT = 5.0
+# How many lines the history keeps: a few hours of one thermostat.
+_HISTORY_SIZE = 300
 
 
 class GatewayMode(StrEnum):
@@ -213,6 +217,10 @@ async def read_frame(reader: asyncio.StreamReader) -> bytes:
     return await reader.readexactly(size)
 
 
+class _HandshakeError(Exception):
+    """A connection did not get through the TLS handshake."""
+
+
 @dataclass(eq=False)
 class _Link:
     """The connection of one thermostat."""
@@ -245,6 +253,10 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
     Set on_state to be told what the thermostats report, on_profile to store a
     recorded profile, and on_upstream to follow whether OJ's gateway can be
     used.
+
+    The gateway keeps a history of what happened on its connections, which is
+    also logged at debug level. It names serial numbers and addresses on the
+    local network, and never holds a login or the content of a profile.
     """
 
     # Each argument is a separate setting of the gateway.
@@ -280,6 +292,9 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         self.on_profile: ProfileListener | None = None
         self.on_upstream: UpstreamListener | None = None
         self.upstream_status: UpstreamStatus | None = None
+        # The fingerprint of the certificate OJ's gateway showed last.
+        self.upstream_fingerprint: str | None = None
+        self._history: deque[str] = deque(maxlen=_HISTORY_SIZE)
         self._ssl_context = ssl_context
         self._upstream_ssl_context = _upstream_ssl_context()
         self._listen_host = listen_host
@@ -296,6 +311,11 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
             return None
         port: int = self._server.sockets[0].getsockname()[1]
         return port
+
+    @property
+    def history(self) -> tuple[str, ...]:
+        """Return the most recent events, oldest first, each with its UTC time."""
+        return tuple(self._history)
 
     @property
     def connected(self) -> frozenset[str]:
@@ -318,18 +338,14 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         if self._server is not None:
             return
         try:
+            # TLS starts in _secure(), so a handshake that fails can be told.
             self._server = await asyncio.start_server(
-                self._accept,
-                self._listen_host,
-                self._listen_port,
-                ssl=self._ssl_context,
-                ssl_handshake_timeout=LOGIN_TIMEOUT,
-                ssl_shutdown_timeout=_STOP_TIMEOUT,
+                self._accept, self._listen_host, self._listen_port
             )
         except OSError as error:
             msg = f"Unable to listen on port {self._listen_port}: {error}"
             raise OJMicrolineConnectionError(msg) from error
-        _LOGGER.debug("The gateway listens on port %s", self.port)
+        self._event("The gateway listens on port %s (%s mode)", self.port, self.mode)
 
     async def stop(self) -> None:
         """Stop listening and close the connection of every thermostat."""
@@ -400,13 +416,16 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         waiting: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         link.sent.add(sequence)
         link.pending[sequence] = waiting
-        _LOGGER.debug("Sending command %s to thermostat %s", sequence, link.serial)
+        self._event("Sending command %s to thermostat %s", sequence, link.serial)
         try:
             link.writer.write(encode_frame(command(sequence, state, link.schedule)))
             await link.writer.drain()
             async with asyncio.timeout(ACKNOWLEDGE_TIMEOUT):
                 acknowledged = await waiting
         except TimeoutError as error:
+            self._event(
+                "Thermostat %s did not answer command %s", link.serial, sequence
+            )
             msg = "The thermostat did not acknowledge the command."
             raise OJMicrolineTimeoutError(msg) from error
         except OSError as error:
@@ -415,13 +434,18 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         finally:
             link.pending.pop(sequence, None)
         if not acknowledged:
+            self._event("Thermostat %s refused command %s", link.serial, sequence)
             msg = "The thermostat refused the command."
             raise OJMicrolineError(msg)
+        self._event("Thermostat %s acknowledged command %s", link.serial, sequence)
 
     def _accept(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         """Serve a new connection in a task that stop() can cancel."""
+        # Nothing may be read before TLS has started, or the start of the
+        # handshake would be taken for a message.
+        cast("asyncio.Transport", writer.transport).pause_reading()
         self._track(asyncio.create_task(self._handle(reader, writer)))
 
     def _track(self, task: asyncio.Task[None]) -> None:
@@ -431,11 +455,15 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
     async def _handle(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        peer = writer.get_extra_info("peername")
+        who = str(peer[0]) if peer else "an unknown address"
         link: _Link | None = None
         try:
+            await self._secure(writer, who)
             serial, login = await self._read_login(reader)
+            who = f"thermostat {serial}"
             if serial not in self.allowed_serials:
-                _LOGGER.debug("Refusing thermostat %s: it is not allowed", serial)
+                self._event("Refusing %s: it is not on the account", who)
                 return
             link = _Link(serial, writer)
             upstream = None
@@ -445,12 +473,16 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
                 await self._answer(reader, link, login)
             else:
                 await self._relay(reader, link, login, upstream)
+        except _HandshakeError:
+            pass  # _secure() told why.
         except (asyncio.IncompleteReadError, ConnectionError, ssl.SSLError):
-            pass  # The thermostat, or OJ's gateway, hung up.
+            self._event("The connection of %s was closed", who)
         except TimeoutError:
-            _LOGGER.debug("Closing a connection that went quiet")
+            self._event("Closing the connection of %s: it went quiet", who)
         except ValueError as error:
-            _LOGGER.debug("Closing a connection after a malformed message: %s", error)
+            self._event(
+                "Closing the connection of %s after a malformed message: %s", who, error
+            )
         except Exception:  # pylint: disable=broad-exception-caught
             # Whatever a thermostat sends, it must not take the gateway down.
             _LOGGER.exception("Unexpected error in the connection of a thermostat")
@@ -478,7 +510,10 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         """Answer a thermostat the way OJ's gateway does, if it has a profile."""
         profile = self.profiles.get(link.serial)
         if profile is None:
-            _LOGGER.debug("Refusing thermostat %s: it has no profile", link.serial)
+            self._event(
+                "Refusing thermostat %s: it has no profile to answer it with yet",
+                link.serial,
+            )
             return
         sequence = Message.parse(login).varint(FIELD_SEQUENCE) or 0
         link.writer.write(encode_frame(login_acknowledgement(sequence)))
@@ -531,7 +566,7 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
             await asyncio.sleep(UPSTREAM_RETRY_INTERVAL)
             upstream = await self._open_upstream()
         upstream[1].close()
-        _LOGGER.debug(
+        self._event(
             "OJ's gateway can be used again; reconnecting thermostat %s", link.serial
         )
         # The thermostat connects again by itself, and is relayed then.
@@ -551,13 +586,19 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
                     ssl=self._upstream_ssl_context,
                     server_hostname=self.endpoint.host,
                 )
-        except OSError:
+        except OSError as error:
             # Unreachable, refused, timed out, or the TLS handshake failed.
+            self._event(
+                "OJ's gateway at %s cannot be used: %r",
+                self.endpoint.upstream_ip,
+                error,
+            )
             self._set_upstream(UpstreamStatus.UNREACHABLE)
             return None
         certificate = writer.get_extra_info("ssl_object").getpeercert(binary_form=True)
         pin = self.endpoint.pin_sha256.replace(":", "").lower()
-        if hashlib.sha256(certificate or b"").hexdigest() != pin:
+        self.upstream_fingerprint = hashlib.sha256(certificate or b"").hexdigest()
+        if self.upstream_fingerprint != pin:
             writer.close()
             self._set_upstream(UpstreamStatus.UNTRUSTED)
             return None
@@ -569,13 +610,15 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
             return
         self.upstream_status = status
         if status is UpstreamStatus.UNTRUSTED:
-            _LOGGER.warning(
-                "The certificate of OJ's gateway at %s does not match the pin; "
-                "nothing is sent to it",
+            self._event(
+                "The certificate of OJ's gateway at %s does not match the pin, so "
+                "nothing is sent to it. Its SHA-256 fingerprint is %s",
                 self.endpoint.upstream_ip,
+                self.upstream_fingerprint,
+                level=logging.WARNING,
             )
         else:
-            _LOGGER.debug(
+            self._event(
                 "OJ's gateway at %s is %s", self.endpoint.upstream_ip, status.value
             )
         self._notify(self.on_upstream, status)
@@ -642,7 +685,12 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
                 # A change made in the vendor's app arrives as a command.
                 self._observe(link, message)
             except ValueError:
-                _LOGGER.debug("OJ's gateway sent a message that is not understood")
+                self._event(
+                    "OJ's gateway sent thermostat %s a message of %s bytes that is "
+                    "not understood",
+                    link.serial,
+                    len(body),
+                )
 
     def _record(self, link: _Link, frame: bytes, message: Message) -> None:
         """Keep the answers of OJ's gateway that make up a profile."""
@@ -659,7 +707,7 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         if self.profiles.get(link.serial) == profile:
             return
         self.profiles[link.serial] = profile
-        _LOGGER.debug("Recorded the profile of thermostat %s", link.serial)
+        self._event("Recorded the profile of thermostat %s", link.serial)
         self._notify(self.on_profile, link.serial, profile)
 
     # --- What both ways of serving share --------------------------------------
@@ -709,10 +757,12 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         if previous is not None:
             # The thermostat connected again, so its old connection is dead.
             self._close(previous)
-        _LOGGER.debug(
-            "Thermostat %s connected to the gateway (%s)",
+        self._event(
+            "Thermostat %s logged in; it is %s",
             link.serial,
-            "relayed" if link.upstream is not None else "answered locally",
+            "relayed to OJ's gateway"
+            if link.upstream is not None
+            else "answered locally",
         )
         self._notify(self.on_state, link.serial, {"Online": True})
 
@@ -721,7 +771,7 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         # A newer connection of the same thermostat keeps it online.
         if self._links.get(link.serial) is link:
             del self._links[link.serial]
-            _LOGGER.debug("Thermostat %s disconnected from the gateway", link.serial)
+            self._event("Thermostat %s is offline", link.serial)
             self._notify(self.on_state, link.serial, {"Online": False})
 
     @staticmethod
@@ -735,12 +785,34 @@ class WG4Gateway:  # pylint: disable=too-many-instance-attributes
         if link.upstream is not None:
             link.upstream.close()
 
-    @staticmethod
-    def _log(sender: str, link: _Link, message: Message) -> None:
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug(
-                "%s (thermostat %s): %s", sender, link.serial, describe(message)
+    def _log(self, sender: str, link: _Link, message: Message) -> None:
+        self._event("%s (thermostat %s): %s", sender, link.serial, describe(message))
+
+    def _event(
+        self, message: str, *arguments: object, level: int = logging.DEBUG
+    ) -> None:
+        """Log what happened on a connection, and keep it in the history."""
+        _LOGGER.log(level, message, *arguments)
+        moment = datetime.now(tz=UTC)
+        self._history.append(f"{moment:%Y-%m-%d %H:%M:%S} {message % arguments}")
+
+    async def _secure(self, writer: asyncio.StreamWriter, address: str) -> None:
+        """Start TLS on a new connection, and tell how that went.
+
+        Whether a thermostat accepts the gateway's certificate and cipher
+        suites shows here, so both outcomes are worth an event.
+        """
+        try:
+            await writer.start_tls(
+                self._ssl_context, ssl_handshake_timeout=LOGIN_TIMEOUT
             )
+        except OSError as error:
+            self._event("The TLS handshake with %s failed: %r", address, error)
+            raise _HandshakeError from error
+        cipher = writer.get_extra_info("cipher")
+        self._event(
+            "Connection from %s, secured with %s (%s)", address, cipher[1], cipher[0]
+        )
 
     @staticmethod
     def _notify(listener: Callable[..., None] | None, *arguments: Any) -> None:

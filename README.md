@@ -384,6 +384,8 @@ cannot be reached. It holds the email address of the account.
 | `WG4Gateway.connected` | The serial numbers of the thermostats that are connected. |
 | `WG4Gateway.is_relayed(serial)` | Whether a thermostat is connected to OJ's gateway as well. |
 | `WG4Gateway.on_upstream`, `upstream_status` | Whether OJ's gateway can be used. `UpstreamStatus.UNTRUSTED` means its certificate does not match the pinned fingerprint; nothing is sent to it then. |
+| `WG4Gateway.upstream_fingerprint` | The SHA-256 fingerprint of the certificate OJ's gateway showed last. |
+| `WG4Gateway.history` | The last 300 events on the connections, each with its UTC time: connections and how TLS went, every message by field number and decoded temperature, commands and their answers. The same lines are logged at debug level by `ojmicroline_thermostat.gateway.server`. A login is never in it. |
 | `WG4LocalAPI.cloud_error` | Why the cloud API could not be used when the thermostats were last fetched, or `None`. |
 | `WG4LocalAPI.cloud` | The `WG4API`, for cloud-only calls such as `set_energy_price`. |
 
