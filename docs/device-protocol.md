@@ -10,6 +10,11 @@ with frames captured from real thermostats.
 
 None of this has been confirmed with this library on real hardware yet.
 
+Where a point is marked as reported, it comes from one WG4 thermostat with
+firmware 1012M201: a capture of a single session with OJ's gateway, and a
+gateway that answered the thermostat itself, both described by its owner in
+[pull request 478 of the Home Assistant integration](https://github.com/robbinjanssen/home-assistant-ojmicroline-thermostat/pull/478).
+
 ## Transport
 
 - The thermostat connects to `na-thermos.ojelectronics.com` on TCP port 9533
@@ -20,9 +25,13 @@ None of this has been confirmed with this library on real hardware yet.
 - A frame is the byte `0x08`, the length of the message as a varint, and a
   protobuf message.
 - Field 1 of a message is a sequence number. An acknowledgement repeats that
-  number with field 3 set to 1.
+  number with field 3 set to 1. See [Sequence numbers](#sequence-numbers).
 - Field 5 is 1 on most messages in both directions. What it means is not
   known.
+- A thermostat keeps the connection it has when the DNS record changes. It
+  looks the name up again when it connects anew. Reported: switching the
+  thermostat off and on is the reliable way to get there, and a factory reset
+  is not needed.
 
 ## From the thermostat
 
@@ -39,6 +48,26 @@ None of this has been confirmed with this library on real hardware yet.
 The gateway requires the login as the first message, within 30 seconds, and
 closes the connection on a second login. A thermostat that stays silent for
 180 seconds is disconnected.
+
+## Sequence numbers
+
+Each side numbers the messages it starts, and an acknowledgement repeats the
+number of the message it answers.
+
+Reported from the captured session, in the order OJ's gateway sent them:
+
+| Message of OJ's gateway | Sequence number |
+| --- | --- |
+| Acknowledgement of the login | 1 |
+| Acknowledgement of the upload with 2 = 6 | 2 |
+| Support answer (field 18) | 0 |
+| Acknowledgement of the upload with 2 = 4 | 3 |
+| Configuration answer (field 10) | 1 |
+| Acknowledgements of the first two heartbeats | 4 and 5 |
+
+So the acknowledgements carry the thermostat's numbers, and OJ's gateway
+counted its own two messages from 0. How its numbers go on in a longer
+session, or for a command from the vendor's app, is not known.
 
 ## State (field 9)
 
@@ -92,7 +121,9 @@ state.
 The two answers that follow the uploads are recorded as the thermostat's
 profile: the configuration answer is a message with field 10 and otherwise
 only fields 1 and 5, the support answer one with field 18. The gateway repeats
-exactly these frames when it answers the thermostat itself.
+exactly these frames when it answers the thermostat itself. Reported: the
+thermostat accepted the two answers of the captured session when another
+gateway repeated them.
 
 If OJ's gateway cannot be reached or is not trusted, a thermostat with a
 profile is answered locally. The gateway then tries OJ's gateway every five
@@ -109,9 +140,12 @@ applies its own time zone.
 These need a real thermostat to answer.
 
 - Does OJ's gateway send the configuration and support answers on every new
-  connection? Recording the profile depends on it.
-- Which sequence numbers does OJ's gateway use? If they reach 101, an
-  acknowledgement can be held back for the wrong sender once.
+  connection? Recording the profile depends on it. Reported: it sent both to
+  a thermostat that was already set up, on a new connection. That is
+  one session, so "every" is still open.
+- How do the sequence numbers of OJ's gateway go on? If they reach 101, an
+  acknowledgement can be held back for the wrong sender once. The reported
+  session had 0 and 1, see [Sequence numbers](#sequence-numbers).
 - After a command of the gateway, does the thermostat report its new state to
   OJ's gateway? If not, the vendor's app shows the old state until the next
   upload.
@@ -126,3 +160,6 @@ These need a real thermostat to answer.
 - Telemetry 15.4 to 15.7, and the device info fields 7.6, 7.7, 7.10, 7.11,
   7.13 and 7.14.
 - The schedule (field 8). It is passed back as the thermostat sent it.
+  Reported: its temperatures are in 1/100 °C, unlike the setpoints of a hold.
+  The thermostat acknowledges a changed schedule without uploading it again,
+  and the change shows in the upload after it connects anew.
