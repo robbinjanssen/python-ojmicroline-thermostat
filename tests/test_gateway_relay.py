@@ -7,7 +7,6 @@ to a fake OJ gateway. Everything runs over TLS on the loopback interface.
 from __future__ import annotations
 
 import asyncio
-import ssl
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -39,7 +38,6 @@ from .gateway_fakes import (
     FakeCloud,
     FakeThermostat,
     acknowledgement,
-    issue_certificate,
     login,
     until,
 )
@@ -64,29 +62,6 @@ FROM_THE_PROFILE = [
     encode_frame(acknowledgement(31)),
     PROFILE.configuration,
 ]
-
-
-@pytest.fixture(scope="session", name="cloud_certificate")
-def cloud_certificate_fixture(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> tuple[ssl.SSLContext, str]:
-    """Create the certificate of the fake OJ gateway, and its fingerprint."""
-    directory = tmp_path_factory.mktemp("cloud")
-    certfile, keyfile, fingerprint = issue_certificate(directory, "cloud")
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile, keyfile)
-    return context, fingerprint
-
-
-@pytest.fixture(name="cloud")
-async def cloud_fixture(
-    cloud_certificate: tuple[ssl.SSLContext, str],
-) -> AsyncIterator[FakeCloud]:
-    """Run a fake OJ gateway on a free port."""
-    cloud = FakeCloud(*cloud_certificate)
-    await cloud.start()
-    yield cloud
-    await cloud.stop()
 
 
 @pytest.fixture(name="recorded")
@@ -240,6 +215,47 @@ async def test_command_goes_straight_to_a_relayed_thermostat(
         Message.parse(acknowledgement(0)),
         Message.parse(acknowledgement(101)),
     ]
+
+
+async def test_answers_are_matched_in_the_order_of_sending(
+    gateway: WG4Gateway, cloud: FakeCloud, connect: Callable[[], Any]
+) -> None:
+    """A number that both gateways used does not mix up their answers."""
+    thermostat = await _relayed(connect)
+    passed_on = len(cloud.received)
+
+    # The gateway sends command 101, and then OJ's gateway uses that number.
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+    assert (await thermostat.receive()).varint(1) == 101
+    from_the_app = command(101, changed_state(STATE, 1), SCHEDULE)
+    await cloud.send(from_the_app)
+    assert await thermostat.receive_frame() == encode_frame(from_the_app)
+
+    # The thermostat answers in that order: the first answer is the gateway's.
+    await thermostat.send(acknowledgement(101))
+    await task
+    assert len(cloud.received) == passed_on
+    await thermostat.send(acknowledgement(101))
+    await until(lambda: len(cloud.received) == passed_on + 1)
+    assert cloud.received[-1] == Message.parse(acknowledgement(101))
+
+
+async def test_command_avoids_a_number_that_is_waiting_for_an_answer(
+    gateway: WG4Gateway, cloud: FakeCloud, connect: Callable[[], Any]
+) -> None:
+    """The gateway skips a number OJ's gateway has an answer outstanding for."""
+    thermostat = await _relayed(connect)
+    passed_on = len(cloud.received)
+
+    from_the_app = command(101, changed_state(STATE, 1), SCHEDULE)
+    await cloud.send(from_the_app)
+    assert await thermostat.receive_frame() == encode_frame(from_the_app)
+
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+    assert (await thermostat.receive()).varint(1) == 102
+    await thermostat.send(acknowledgement(102))
+    await task
+    assert len(cloud.received) == passed_on
 
 
 async def test_change_in_the_app_reaches_the_thermostat(
@@ -441,6 +457,46 @@ async def test_thermostat_is_answered_locally_while_ojs_gateway_is_down(
     assert await again.upload() == FROM_THE_PROFILE
     assert not gateway.is_relayed(SERIAL)
     assert gateway.upstream_status is UpstreamStatus.UNREACHABLE
+
+
+async def test_ojs_gateway_is_left_alone_after_it_was_unreachable(
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A thermostat that connects again is answered at once.
+
+    It gives up on a login within seconds. Waiting for OJ's gateway on every
+    new connection would keep it from ever being answered.
+    """
+
+    def attempts() -> int:
+        return "\n".join(gateway.history).count("cannot be used")
+
+    await cloud.stop()
+
+    # Without a profile OJ's gateway is the only way, so it is tried each time.
+    for expected in (1, 2):
+        refused: FakeThermostat = await connect()
+        await refused.send(login())
+        assert await refused.was_closed()
+        assert attempts() == expected
+
+    gateway.profiles[SERIAL] = PROFILE
+    thermostat: FakeThermostat = await connect()
+    assert (await thermostat.login()).varint(3) == 1
+    assert attempts() == 2
+    assert f"Not waiting for OJ's gateway for thermostat {SERIAL}" in "\n".join(
+        gateway.history
+    )
+    assert not gateway.is_relayed(SERIAL)
+
+    # After the interval a new connection tries OJ's gateway again.
+    monkeypatch.setattr(gateway_server, "UPSTREAM_RETRY_INTERVAL", 0)
+    again: FakeThermostat = await connect()
+    assert (await again.login()).varint(3) == 1
+    assert attempts() == 3
 
 
 async def test_gateway_that_does_not_answer_counts_as_unreachable(

@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import platform
+import socket
 import ssl
+import struct
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
@@ -26,6 +29,7 @@ from ojmicroline_thermostat.gateway import (
     server_ssl_context,
 )
 from ojmicroline_thermostat.gateway import server as gateway_server
+from ojmicroline_thermostat.gateway import wg4_gateway as gateway_wg4
 from ojmicroline_thermostat.gateway.protobuf import (
     MAX_FRAME,
     Message,
@@ -33,7 +37,7 @@ from ojmicroline_thermostat.gateway.protobuf import (
     encode_frame,
     encode_varint,
 )
-from ojmicroline_thermostat.gateway.server import read_frame
+from ojmicroline_thermostat.gateway.server import read_frame, tcp_state
 
 from .gateway_fakes import (
     PROFILE,
@@ -453,7 +457,7 @@ async def test_unexpected_error_closes_the_connection(
         msg = "boom"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(gateway_server, "decode_telemetry", broken)
+    monkeypatch.setattr(gateway_wg4, "decode_telemetry", broken)
     thermostat: FakeThermostat = await connect()
     await thermostat.login()
     await thermostat.send(TELEMETRY)
@@ -599,28 +603,139 @@ async def test_set_mode_without_acknowledgement(
     connect: Callable[[], Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A command the thermostat does not confirm fails, and changes nothing."""
+    """A command the thermostat does not confirm in time fails."""
     monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 0.05)
     thermostat = await _connected(connect)
     seen = len(events)
 
     with pytest.raises(OJMicrolineTimeoutError, match="did not acknowledge"):
         await gateway.set_mode(SERIAL, 3, 2250)
-    assert f"Thermostat {SERIAL} did not answer command 101" in gateway.history[-1]
+    assert gateway.history[-1].endswith(
+        f"Thermostat {SERIAL} did not answer command 101 within 0.05 seconds"
+    )
     assert (await thermostat.receive()).varint(1) == 101
     assert len(events) == seen
 
-    # A late answer is ignored, and the next command starts from the state the
-    # thermostat reported: the permanent hold still has 22.22 °C.
-    await thermostat.send(acknowledgement(101))
+    # Until it answers, the next command starts from the state the thermostat
+    # reported: the permanent hold still has 22.22 °C.
     task = asyncio.create_task(gateway.set_mode(SERIAL, 1))
     sent = await thermostat.receive()
     assert sent.varint(1) == 102
     state = sent.message(9)
     assert state is not None
     assert state.message(5) == Message.parse(encode_field(1, 4444))
+    await thermostat.send(acknowledgement(102, accepted=0))
+    with pytest.raises(OJMicrolineError, match="refused"):
+        await task
+
+
+async def test_late_acknowledgement_still_counts(
+    gateway: WG4Gateway,
+    events: Events,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A thermostat that confirms after the wait ended has still changed."""
+    monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 0.05)
+    thermostat = await _connected(connect)
+    seen = len(events)
+
+    with pytest.raises(OJMicrolineTimeoutError, match="did not acknowledge"):
+        await gateway.set_mode(SERIAL, 3, 2250)
+    await thermostat.receive()
+    await asyncio.sleep(0.05)
+    await thermostat.send(acknowledgement(101))
+
+    # The listener hears what the thermostat took over after all.
+    await until(lambda: len(events) == seen + 1)
+    assert events[-1] == (
+        SERIAL,
+        {
+            "RegulationMode": 3,
+            "ComfortTemperature": 1666,
+            "ManualTemperature": 2250,
+            "SetPointTemp": 2250,
+        },
+    )
+    assert "acknowledged command 101 after" in gateway.history[-1]
+    assert gateway.history[-1].endswith("after the wait for it had ended")
+
+    # The next command starts from it: the permanent hold has 22.5 °C now.
+    monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 2)
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 1))
+    sent = await thermostat.receive()
+    state = sent.message(9)
+    assert state is not None
+    assert state.message(5) == Message.parse(encode_field(1, 4500))
     await thermostat.send(acknowledgement(102))
     await task
+
+
+async def test_timeout_tells_what_the_network_did(
+    gateway: WG4Gateway,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The state of the connection is part of the event, where it is known."""
+    monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 0.05)
+    monkeypatch.setattr(gateway_server, "tcp_state", lambda _writer: "TCP: stuck")
+    await _connected(connect)
+
+    with pytest.raises(OJMicrolineTimeoutError):
+        await gateway.set_mode(SERIAL, 3, 2250)
+    assert gateway.history[-1].endswith("within 0.05 seconds (TCP: stuck)")
+
+
+def _tcp_writer(answer: bytes | Exception | None) -> MagicMock:
+    """Create a writer whose socket answers a request for its TCP state."""
+    writer = MagicMock(spec=asyncio.StreamWriter)
+    if answer is None:
+        writer.get_extra_info.return_value = None
+        return writer
+    connection = MagicMock()
+    if isinstance(answer, Exception):
+        connection.getsockopt.side_effect = answer
+    else:
+        connection.getsockopt.return_value = answer
+    writer.get_extra_info.return_value = connection
+    return writer
+
+
+def test_tcp_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Linux tells how much of what was sent has not arrived."""
+    monkeypatch.setattr(socket, "TCP_INFO", 11, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    counters = [0] * 24
+    counters[0] = 12_800_000  # The retransmission timer, in microseconds.
+    counters[2] = 1460  # The segment size.
+    counters[4] = 1  # Segments that are not acknowledged.
+    counters[12] = 13_200  # Milliseconds since the last acknowledgement.
+    counters[15] = 45_000  # The round trip, in microseconds.
+    counters[23] = 9  # Retransmissions in total.
+    raw = struct.pack("=8B24I", 1, 0, 6, 0, 6, 0, 0, 0, *counters)
+
+    assert tcp_state(_tcp_writer(raw)) == (
+        "TCP: 1 segments unacknowledged, the oldest sent again 6 times, "
+        "9 retransmissions in total, last acknowledgement 13.2 s ago, "
+        "retransmission timer 12.8 s, round trip 45 ms, segment size 1460"
+    )
+    # A system that answers with less, or refuses, tells nothing.
+    assert tcp_state(_tcp_writer(raw[:20])) == ""
+    assert tcp_state(_tcp_writer(OSError("not supported"))) == ""
+    assert tcp_state(_tcp_writer(None)) == ""
+
+
+def test_tcp_state_is_only_read_on_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Other systems lay the same request out differently, or lack it."""
+    writer = _tcp_writer(bytes(104))
+    monkeypatch.setattr(socket, "TCP_INFO", 11, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    assert tcp_state(writer) == ""
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.delattr(socket, "TCP_INFO")
+    assert tcp_state(writer) == ""
+    writer.get_extra_info.return_value.getsockopt.assert_not_called()
 
 
 async def test_set_mode_refused(
@@ -651,9 +766,17 @@ async def test_closing_a_link_leaves_finished_commands_alone() -> None:
     finished.set_result(True)
     waiting: asyncio.Future[bool] = loop.create_future()
     writer = MagicMock(spec=asyncio.StreamWriter)
-    link = gateway_server._Link(  # pylint: disable=protected-access
-        SERIAL, writer, pending={101: finished, 102: waiting}
+    # pylint: disable=protected-access
+    link = gateway_server._Link(SERIAL, writer)
+    link.unanswered.extend(
+        [
+            gateway_server._Sent(101, lambda: None, finished),
+            gateway_server._Sent(102, lambda: None, waiting),
+            # A message of OJ's gateway, which nobody here waits for.
+            gateway_server._Sent(7),
+        ]
     )
+    # pylint: enable=protected-access
 
     WG4Gateway._close(link)  # pylint: disable=protected-access
 

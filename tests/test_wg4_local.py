@@ -29,8 +29,8 @@ from ojmicroline_thermostat import (
     WG4Gateway,
     WG4LocalAPI,
     server_ssl_context,
-    wg4_local,
 )
+from ojmicroline_thermostat import local as local_api
 from ojmicroline_thermostat.const import (
     REGULATION_COMFORT,
     REGULATION_MANUAL,
@@ -207,7 +207,7 @@ async def test_slow_cloud_is_not_waited_for(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A cloud API that takes too long counts as a cloud that failed."""
-    monkeypatch.setattr(wg4_local, "CLOUD_TIMEOUT", 0.05)
+    monkeypatch.setattr(local_api, "CLOUD_TIMEOUT", 0.05)
 
     async def slow() -> None:
         await asyncio.sleep(1)

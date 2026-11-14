@@ -336,6 +336,10 @@ def describe(message: Message) -> str:
     kind = message.varint(FIELD_KIND)
     if kind is not None:
         parts.append(f"kind={kind}")
+    answer = message.varint(FIELD_ACKNOWLEDGED)
+    if answer is not None:
+        # 1 accepts the message this answers; anything else refuses it.
+        parts.append(f"answer={answer}")
     try:
         parts += _describe_state(message)
         parts += _describe_device_info(message)

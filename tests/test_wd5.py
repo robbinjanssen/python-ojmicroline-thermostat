@@ -134,6 +134,50 @@ async def test_get_thermostats(aresponses: ResponsesMockServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_thermostats_json(aresponses: ResponsesMockServer) -> None:
+    """The thermostats are also available as the API returns them."""
+    for body in (load_fixtures("wd5_group.json"), json.dumps({"ErrorCode": 1})):
+        aresponses.add(
+            "ojmicroline.test.host",
+            "/api/Group/GroupContents",
+            "GET",
+            Response(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                text=body,
+            ),
+        )
+
+    async with aiohttp.ClientSession() as session:
+        api = WD5API(
+            host="ojmicroline.test.host",
+            api_key="ap1-k3y-v3ry-s3cret",
+            customer_id=1337,
+            username="py",
+            password="test",
+        )
+        api._session_calls_left = 300
+        api._session_id = "f00b4r"
+        OJMicroline(api=api, session=session)
+
+        result = await api.get_thermostats_json()
+        expected = json.loads(load_fixtures("wd5_group.json"))
+        items = [
+            item
+            for group in expected["GroupContents"]
+            for item in group["Thermostats"]
+            if item
+        ]
+        assert result == {str(item["SerialNumber"]): item for item in items}
+        # Each of them is what the thermostat model is built from.
+        for serial, item in result.items():
+            assert Thermostat.from_wd5_json(item).serial_number == serial
+
+        with pytest.raises(OJMicrolineResultsError):
+            await api.get_thermostats_json()
+
+
+@pytest.mark.asyncio
 async def test_get_thermostats_failed(aresponses: ResponsesMockServer) -> None:
     """Test get thermostats function to handle an error."""
     aresponses.add(

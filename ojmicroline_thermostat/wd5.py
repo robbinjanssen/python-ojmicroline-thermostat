@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from aiohttp import hdrs
+
 from .const import (
     REGULATION_BOOST,
     REGULATION_COMFORT,
@@ -80,6 +82,35 @@ class WD5API(SessionOJMicrolineAPI):
                     results.append(Thermostat.from_wd5_json(item))
 
         return results
+
+    async def get_thermostats_json(self) -> dict[str, dict[str, Any]]:
+        """Fetch the thermostats as the API returns them, without energy usage.
+
+        This is what Thermostat.from_wd5_json() takes.
+
+        Returns
+        -------
+            The JSON of each thermostat, by serial number.
+
+        Raises
+        ------
+            OJMicrolineResultsError: The API reported an error.
+
+        """
+        data = await self.request(
+            self.get_thermostats_path,
+            method=hdrs.METH_GET,
+            params={"sessionid": self._session_id, **self.get_thermostats_params()},
+        )
+        if data["ErrorCode"] == 1:
+            msg = "Unable to get thermostats via API."
+            raise OJMicrolineResultsError(msg, {"data": data})
+        return {
+            str(item["SerialNumber"]): item
+            for group in data["GroupContents"]
+            for item in group["Thermostats"]
+            if len(item)
+        }
 
     get_energy_usage_path: str = "api/EnergyUsage/GetEnergyUsage"
 
