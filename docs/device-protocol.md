@@ -1,24 +1,39 @@
-# Device protocol of WG4-series thermostats
+# Device protocol of WG4-series and WD5-series thermostats
 
-Maintainer notes on how a WG4-series thermostat talks to OJ's device gateway,
-as implemented in [`ojmicroline_thermostat/gateway`](../ojmicroline_thermostat/gateway).
-There is no published specification. The field numbers are as observed by
+Maintainer notes on how a thermostat talks to OJ's device gateway, as
+implemented in [`ojmicroline_thermostat/gateway`](../ojmicroline_thermostat/gateway).
+There is no published specification. Most of this document is about the WG4
+series; the [WD5 series](#wd5-series) has its own section at the end.
+
+The WG4 field numbers are as observed by
 [peskyAdmin/schluter-local](https://github.com/peskyAdmin/schluter-local)
 (MIT), whose protocol notes this document is adapted from. The tests in
 [`tests/test_gateway_wg4.py`](../tests/test_gateway_wg4.py) pin the behaviour
 with frames captured from real thermostats.
 
-None of this has been confirmed with this library on real hardware yet.
+This library has run against one real WG4 thermostat, with firmware 1012M201,
+on 13 November 2026 (the report is in
+[pull request 478 of the Home Assistant integration](https://github.com/robbinjanssen/home-assistant-ojmicroline-thermostat/pull/478)).
+What that showed is marked as seen. A point marked as reported comes from the
+same thermostat, but from its owner's own gateway and captures.
 
-Where a point is marked as reported, it comes from one WG4 thermostat with
-firmware 1012M201: a capture of a single session with OJ's gateway, and a
-gateway that answered the thermostat itself, both described by its owner in
-[pull request 478 of the Home Assistant integration](https://github.com/robbinjanssen/home-assistant-ojmicroline-thermostat/pull/478).
+Seen to work: the TLS connection with a self-signed certificate, the relay,
+recording the profile, a change through the cloud arriving as a command, and
+answering the thermostat locally. Seen to fail: the thermostat acknowledged
+the commands of this gateway 13 to 33 seconds after they were sent, which was
+too late for the gateway. Why is an [open question](#open-questions).
 
 ## Transport
 
 - The thermostat connects to `na-thermos.ojelectronics.com` on TCP port 9533
-  with TLS 1.2. It does not check the certificate of the server.
+  with TLS 1.2. It does not check the certificate of the server. Seen: it
+  negotiates AES256-SHA256.
+- Seen: a thermostat whose login is not answered connects again every 7.6
+  seconds. An answer that came 3.6 seconds after it connected was too late,
+  one after 0.4 seconds was in time.
+- Seen: a heartbeat that is not acknowledged is sent again after 5 seconds
+  with the next sequence number. After four of them the thermostat connects
+  again.
 - OJ's gateway presents a self-signed certificate. `WG4_NORTH_AMERICA` holds
   its SHA-256 fingerprint, read on 9 November 2026 from a certificate that is
   valid until 2114.
@@ -54,20 +69,18 @@ closes the connection on a second login. A thermostat that stays silent for
 Each side numbers the messages it starts, and an acknowledgement repeats the
 number of the message it answers.
 
-Reported from the captured session, in the order OJ's gateway sent them:
+Seen on three connections: the acknowledgements of OJ's gateway carry the
+thermostat's numbers, which were above 5800 and go on from one connection to
+the next. OJ's gateway counts its own messages from 0 on every connection:
+the support answer is 0 and the configuration answer 1. Reported from the log
+of the same test: its commands went on from 2, and it sent a command again,
+with the next number, while the thermostat had not acknowledged the one
+before.
 
-| Message of OJ's gateway | Sequence number |
-| --- | --- |
-| Acknowledgement of the login | 1 |
-| Acknowledgement of the upload with 2 = 6 | 2 |
-| Support answer (field 18) | 0 |
-| Acknowledgement of the upload with 2 = 4 | 3 |
-| Configuration answer (field 10) | 1 |
-| Acknowledgements of the first two heartbeats | 4 and 5 |
-
-So the acknowledgements carry the thermostat's numbers, and OJ's gateway
-counted its own two messages from 0. How its numbers go on in a longer
-session, or for a command from the vendor's app, is not known.
+So on a connection that lasts long enough, the numbers of OJ's gateway reach
+those of this gateway, which start at 101. That is why an acknowledgement is
+matched by the order in which the messages were sent, see
+[Commands to the thermostat](#commands-to-the-thermostat).
 
 ## State (field 9)
 
@@ -97,8 +110,17 @@ thermostat switches mode but keeps the old setpoint.
 
 The gateway changes those fields in the encoded state itself, so every other
 byte goes back as the thermostat sent it. It sends one command at a time per
-thermostat and waits 10 seconds for the acknowledgement. After that, the state
-it sent is the basis for the next command. Its sequence numbers start at 101.
+thermostat and waits 10 seconds for the acknowledgement. Its sequence numbers
+start at 101, and skip a number that a message of OJ's gateway is still
+waiting on.
+
+The thermostat acknowledges in the order it received. The gateway keeps what
+it sent the thermostat and what OJ's gateway sent, in that order, and gives
+an acknowledgement to the oldest message with its number. Once the thermostat
+accepts a command, the state of that command is the basis for the next one and
+is reported as the new state. That also holds for an acknowledgement that
+comes after the 10 seconds: the caller got an error by then, but the
+thermostat did change.
 
 A command is only sent to a thermostat that is connected and has uploaded its
 state. It is never kept for later.
@@ -130,6 +152,12 @@ profile is answered locally. The gateway then tries OJ's gateway every five
 minutes, and disconnects the thermostat once it works, so the thermostat
 connects again and is relayed.
 
+OJ's gateway gets 3 seconds to accept a connection. For five minutes after it
+could not be reached, a thermostat with a profile is answered locally at once,
+without another attempt. Seen: with a wait of 10 seconds on every new
+connection, a thermostat was never answered while OJ's gateway was
+unreachable, because it gives up on its login sooner than that.
+
 ## Time
 
 The gateway sends UTC as the server time, as OJ's gateway does. The thermostat
@@ -139,13 +167,19 @@ applies its own time zone.
 
 These need a real thermostat to answer.
 
+- Why does the thermostat acknowledge a command of this gateway so late?
+  Seen: 13, 16.5 and 32 seconds after the command was sent, and once not
+  within a minute. In that time nothing else the gateway sent was answered
+  either: an acknowledgement of a heartbeat did not arrive, and OJ's gateway
+  repeated its commands. Reported: the owner's own gateway sends the same
+  command and gets its acknowledgement within 10 seconds. The delays fit the
+  moments at which the system sends a TCP segment again, which would mean
+  that the command does not reach the thermostat at first. The event of a
+  command that timed out therefore tells the state of the TCP connection,
+  and that of an acknowledgement tells its value.
 - Does OJ's gateway send the configuration and support answers on every new
-  connection? Recording the profile depends on it. Reported: it sent both to
-  a thermostat that was already set up, on a new connection. That is
-  one session, so "every" is still open.
-- How do the sequence numbers of OJ's gateway go on? If they reach 101, an
-  acknowledgement can be held back for the wrong sender once. The reported
-  session had 0 and 1, see [Sequence numbers](#sequence-numbers).
+  connection? Seen: on each of three connections of a thermostat that was
+  already set up.
 - After a command of the gateway, does the thermostat report its new state to
   OJ's gateway? If not, the vendor's app shows the old state until the next
   upload.
@@ -160,6 +194,89 @@ These need a real thermostat to answer.
 - Telemetry 15.4 to 15.7, and the device info fields 7.6, 7.7, 7.10, 7.11,
   7.13 and 7.14.
 - The schedule (field 8). It is passed back as the thermostat sent it.
-  Reported: its temperatures are in 1/100 °C, unlike the setpoints of a hold.
-  The thermostat acknowledges a changed schedule without uploading it again,
-  and the change shows in the upload after it connects anew.
+  Reported, in [issue 480 of the integration](https://github.com/robbinjanssen/home-assistant-ojmicroline-thermostat/issues/480):
+  8.1 is the time of the change and 8.2 the week, which has a day in every
+  field 1. A day is {1 its number, 1 for Monday to 7 for Sunday; 2 an event,
+  once per event}, and an event {1 the clock as hour, minute and second; 2 the
+  temperature; 3 whether it is active}. The thermostat that was looked at has
+  six events a day. The temperatures are in 1/100 °C, unlike the setpoints
+  of a hold. The thermostat acknowledges a changed schedule without uploading
+  it again, and the change shows in the upload after it connects anew.
+
+## WD5 series
+
+The WD5 series (OWD5, MWD5) uses the same frames and the same TLS connection
+with other fields. What is known comes from
+[patricknitsch/ioBroker.schlueter-thermostat](https://github.com/patricknitsch/ioBroker.schlueter-thermostat)
+(MIT), where it was worked out on an OWD5 thermostat with firmware 1013W220.
+The module [`gateway/wd5.py`](../ojmicroline_thermostat/gateway/wd5.py) lists
+every field, and [`tests/test_gateway_wd5.py`](../tests/test_gateway_wd5.py)
+holds the captured frames. This library has not run against a real WD5
+thermostat yet.
+
+### Where the thermostat connects
+
+A WD5 thermostat connects to port 9513 of a hostname that holds the customer
+ID of its brand:
+
+| Hostname | Brand | How it is known |
+| --- | --- | --- |
+| `owd5-r1099-thermostat.ojelectronics.com` | Customer 99, the SWATT app | Seen in the DNS requests of an OWD5 thermostat |
+| `owd5-sl003-thermostat.ojelectronics.com` | Customer 3, Schlüter in Europe | Reported by the ioBroker adapter |
+
+On 14 November 2026 both names led to the same address, with one certificate
+that is valid until 2044. The hostnames of other brands are not known.
+
+### Messages
+
+Field 1 is the sequence number. An acknowledgement repeats it with field 3 set
+to 1, and a message that wants an answer has field 4 set to 1.
+
+| From the thermostat | Meaning | Answer of the gateway |
+| --- | --- | --- |
+| Field 5 | Login: the serial number, the device type, the firmware and the clock. It holds no email address | Acknowledgement with 4 = 1 and 12 = {1: server time}, then a request for the full upload: sequence 0, 4 = 1, 10 = {1: server time, 2: 1} |
+| Field 6 | Heartbeat, about once a minute: the room and floor temperature in 1/100 °C, and whether the floor is heating | Acknowledgement with the server time |
+| Field 7 | Device info: the name, the time zone in seconds, the load in W | Acknowledgement with the server time |
+| Field 8 | The schedule | Acknowledgement with the server time |
+| Field 9 | The state, with only the fields that matter in its mode | Acknowledgement with the server time |
+| Fields 1 and 3 | The thermostat acknowledges a message it received | Nothing |
+
+Unlike the WG4 series, nothing has to be recorded before the gateway can
+answer a thermostat itself: none of these answers depends on the thermostat.
+
+### State and commands
+
+The state is field 9: 9.1 the time of the change, 9.2 the regulation mode in
+the codes of the cloud API, 9.3 the comfort hold {1 setpoint, 2 end}, 9.4
+manual {1 setpoint}, 9.5 the vacation {1 enabled, 2 first day, 3 last day,
+4 setpoint}, 9.6 boost {1 end} and 9.7 frost protection {1 setpoint}.
+Setpoints are in 1/200 °C. Days and ends are in the local time of the
+thermostat, and 1970-01-01 means that one is not set.
+
+A command is a message with 4 = 1 and a complete state in field 9, which the
+thermostat takes over as a whole. The thermostat itself only reports the part
+of its state that matters in its mode, so that is no base for a command. The
+gateway starts from the last command the thermostat was sent on the
+connection, by OJ's gateway or by itself. Before any command it builds the
+state from what the thermostat reported and what the cloud API knows of it.
+That includes the vacation: left out, a command would erase a vacation the
+thermostat has stored. A setpoint that nobody knows becomes a default.
+
+The gateway sets the schedule, comfort, manual, boost and eco modes. Reported
+as working on the OWD5 thermostat: those five and the vacation. This library
+leaves the vacation and frost protection to the cloud API.
+
+### Open questions
+
+- Everything above, with this library on a real thermostat.
+- How fast a thermostat acknowledges a command, given what the WG4 series
+  showed.
+- What 9.8 and 9.9 of the state mean; OJ's gateway sends 1 and 0. And what
+  6.5 to 6.7 of the heartbeat mean.
+- Whether the time zone a thermostat reports (7.3) includes summer time. The
+  end of a comfort hold or a boost is written in the local time of the
+  thermostat, so an hour of difference would show there. A time zone west of
+  UTC has not been seen either; it is read as a negative number.
+- Which fields of a state OJ's gateway always sends. Its logged commands
+  differ: one for the manual mode had no vacation and no boost.
+- Which hostnames the thermostats of other brands connect to.

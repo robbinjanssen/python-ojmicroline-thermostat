@@ -18,15 +18,22 @@ ojmicroline_thermostat/
                    SessionOJMicrolineAPI base class
   wd5.py           WD5API: WD5 series (OWD5, MWD5), session API
   wg4.py           WG4API: WG4 series (UWG4, AWG4), session API, push long-poll
-  wg4_local.py     WG4LocalAPI: WG4 series on a local gateway, with the cloud
-                   API for what the thermostat does not report itself
+  local.py         LocalAPI: what the APIs for a local gateway share, with
+                   the cloud API for what a thermostat does not report itself
+  wg4_local.py     WG4LocalAPI: WG4 series on a local gateway
+  wd5_local.py     WD5LocalAPI: WD5 series on a local gateway
   wg5.py           WG5API: WG5 series (UWG5), OAuth2 API
-  gateway/         local device gateway for the WG4 series, adapted from
-                   schluter-local (MIT, see gateway/LICENSE)
+  gateway/         local device gateway, adapted from schluter-local (WG4) and
+                   ioBroker.schlueter-thermostat (WD5), both MIT, see
+                   gateway/LICENSE
     protobuf.py    wire format: varints, messages, frames
-    wg4.py         the messages between thermostat and gateway
-    profile.py     DeviceProfile: the answers of OJ's gateway to repeat
-    server.py      WG4Gateway: listener, relay to OJ's gateway, commands
+    server.py      DeviceGateway: listener, relay to OJ's gateway, commands;
+                   what every series has in common
+    wg4.py         the messages of the WG4 series
+    wg4_gateway.py WG4Gateway: what a WG4 thermostat says and expects
+    profile.py     DeviceProfile: the answers of OJ's gateway to repeat (WG4)
+    wd5.py         the messages of the WD5 series
+    wd5_gateway.py WD5Gateway: what a WD5 thermostat says and expects
   models/          Thermostat and Schedule dataclasses, parsed per series
   exceptions.py    public exceptions
   const.py         regulation modes and other constants
@@ -79,8 +86,20 @@ work on a branch.
 - **Typing**: mypy runs in strict mode from `pyproject.toml`; there is no
   `mypy.ini`.
 - **Gateway**: the protocol has no specification; `docs/device-protocol.md`
-  lists what is known and what is not. It has not run against a real
-  thermostat yet, so do not present it as verified.
+  lists what is known and what is not, and marks what was seen on a real
+  thermostat. The WG4 gateway has run against one, with commands that were
+  acknowledged too late; the WD5 gateway has not. Do not present either as
+  verified.
+  - `DeviceGateway` knows no field of a series besides the sequence number
+    and the acknowledgement. What differs per series goes into the hooks of
+    its subclass, not into a check on the series.
+  - A thermostat answers in the order it received. Match its answer through
+    `_Link.unanswered`, never by number alone: OJ's gateway and this one can
+    use the same number.
+  - A command takes effect when the thermostat accepts it, in the `accept`
+    callback of `_send_command()`, also when that is after the caller's wait.
+  - A thermostat gives up on its login within seconds. Nothing between its
+    login and the answer may wait on the network for long.
   - Change a field with `set_field()`, never by re-encoding a parsed message:
     every byte that is not understood goes back as the thermostat sent it.
   - A login holds the account's email address. Never log or store it;
@@ -89,7 +108,10 @@ work on a branch.
     logs it and keeps it in `history` for a report from a real thermostat.
   - Nothing is sent to OJ's gateway before its certificate matched the pin.
   - A cloud failure must not stop or delay a thermostat on the gateway, which
-    is why `WG4LocalAPI.login()` does nothing.
+    is why `LocalAPI.login()` does nothing.
+  - A WD5 command is a complete state that the thermostat takes over as a
+    whole. Build it from the last command or from everything that is known,
+    or it erases what the thermostat has stored, such as a vacation.
 
 ## Tests
 
@@ -102,7 +124,7 @@ work on a branch.
   (`tests/gateway_fakes.py`) against a real `WG4Gateway`, over TLS on the
   loopback interface. `trustme` creates the certificates, as the hooks reject
   a committed private key. Timeouts are module constants in `gateway/server.py`
-  and `wg4_local.py`; shorten them with `monkeypatch` instead of sleeping.
+  and `local.py`; shorten them with `monkeypatch` instead of sleeping.
 - `config.py` (gitignored) holds real credentials for `test_output.py`, a
   manual script. Never commit it, and never print credentials or tokens.
   `test_output.py`'s import order depends on whether `config.py` exists, which
