@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from ojmicroline_thermostat.exceptions import OJMicrolineTimeoutError
 from ojmicroline_thermostat.gateway import (
     WG4_NORTH_AMERICA,
     DeviceProfile,
@@ -342,11 +343,102 @@ async def test_reconnect_replaces_the_relayed_connection(
     assert gateway.is_relayed(SERIAL)
 
 
+async def test_relay_passes_on_what_the_thermostat_says_unknowingly(
+    gateway: WG4Gateway, cloud: FakeCloud, events: Events, connect: Callable[[], Any]
+) -> None:
+    """A message the gateway cannot read still reaches OJ's gateway.
+
+    The relay goes on: a firmware this library does not know must not cut the
+    thermostat off from the vendor's app.
+    """
+    thermostat = await _relayed(connect)
+    reported = len(events)
+    passed_on = len(cloud.received)
+
+    # Not a message at all, and a state that is not a message. Neither wants
+    # an answer of OJ's gateway.
+    await thermostat.send(b"\x00")
+    unreadable = encode_field(9, b"\x00")
+    await thermostat.send(unreadable)
+    await until(lambda: len(cloud.received) == passed_on + 1)
+    assert cloud.not_understood == [b"\x00"]
+    assert cloud.received[-1] == Message.parse(unreadable)
+    assert len(events) == reported
+    history = "\n".join(gateway.history)
+    assert "a message of 1 bytes that is not understood" in history
+    assert "sent a message that is not understood" in history
+
+    # The relay goes on, and a command still starts from the last good state.
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 1))
+    sent = await thermostat.receive()
+    state = sent.message(9)
+    assert state is not None
+    assert state.message(5) == Message.parse(encode_field(1, 4444))
+    await thermostat.send(acknowledgement(101))
+    await task
+    assert gateway.is_relayed(SERIAL)
+
+
+async def test_lost_command_does_not_take_the_answer_of_ojs_gateway(
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A command that was never answered gives up its number in time.
+
+    OJ's gateway counts from 0 and can reach the number of a command that the
+    thermostat never answered. The thermostat's answer is then OJ's.
+    """
+    monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 0.05)
+    thermostat = await _relayed(connect)
+    passed_on = len(cloud.received)
+
+    with pytest.raises(OJMicrolineTimeoutError):
+        await gateway.set_mode(SERIAL, 3, 2250)
+    assert (await thermostat.receive()).varint(1) == 101
+
+    from_the_app = command(101, changed_state(STATE, 1), SCHEDULE)
+    await cloud.send(from_the_app)
+    assert await thermostat.receive_frame() == encode_frame(from_the_app)
+    await thermostat.send(acknowledgement(101))
+    await until(lambda: len(cloud.received) == passed_on + 1)
+    assert cloud.received[-1] == Message.parse(acknowledgement(101))
+    assert "never answered command 101" in "\n".join(gateway.history)
+
+
+async def test_late_acknowledgement_counts_for_a_while(
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    events: Events,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After LATE_ACKNOWLEDGE_TIMEOUT a command counts as lost."""
+    monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 0.01)
+    monkeypatch.setattr(gateway_server, "LATE_ACKNOWLEDGE_TIMEOUT", 0.05)
+    thermostat = await _relayed(connect)
+    passed_on = len(cloud.received)
+    with pytest.raises(OJMicrolineTimeoutError):
+        await gateway.set_mode(SERIAL, 3, 2250)
+    assert (await thermostat.receive()).varint(1) == 101
+    await asyncio.sleep(0.06)
+
+    # The next command forgets the lost one; its answer is no longer taken.
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2300))
+    assert (await thermostat.receive()).varint(1) == 102
+    await thermostat.send(acknowledgement(101))
+    await thermostat.send(acknowledgement(102))
+    await task
+    assert events[-1][1]["ManualTemperature"] == 2300
+    await until(lambda: len(cloud.received) == passed_on + 1)
+    assert cloud.received[-1] == Message.parse(acknowledgement(101))
+
+
 @pytest.mark.parametrize(
     "data",
     [
         encode_frame(login()),
-        encode_frame(b"\x00"),
         b"\x09",
     ],
 )
@@ -416,18 +508,20 @@ async def test_untrusted_gateway_gets_nothing(  # noqa: PLR0913, PLR0917 # pylin
     assert f"Its SHA-256 fingerprint is {cloud.fingerprint}" in caplog.text
     assert f"fingerprint is {cloud.fingerprint}" in "\n".join(gateway.history)
 
-    # With a profile it is answered locally.
+    # With a profile it is answered locally, without asking OJ's gateway
+    # again: it would only show the same certificate.
     gateway.profiles[SERIAL] = PROFILE
     again: FakeThermostat = await connect()
     assert (await again.login()).varint(3) == 1
     assert await again.upload() == FROM_THE_PROFILE
     assert gateway.connected == {SERIAL}
     assert not gateway.is_relayed(SERIAL)
+    assert "it could not be used 0 seconds ago" in "\n".join(gateway.history)
 
-    # OJ's gateway saw two connections come and go without a single message,
+    # OJ's gateway saw one connection come and go without a single message,
     # and the problem was reported once.
-    await until(lambda: cloud.hung_up == 2)
-    assert cloud.connections == 2
+    await until(lambda: cloud.hung_up == 1)
+    assert cloud.connections == 1
     assert not cloud.received
     assert not recorded
     assert statuses == [UpstreamStatus.UNTRUSTED]

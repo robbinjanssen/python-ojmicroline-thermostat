@@ -8,6 +8,7 @@ the relay are in test_gateway_relay.py.
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import platform
 import socket
@@ -24,6 +25,7 @@ from ojmicroline_thermostat import (
     OJMicrolineTimeoutError,
 )
 from ojmicroline_thermostat.gateway import (
+    DeviceProfile,
     GatewayMode,
     WG4Gateway,
     server_ssl_context,
@@ -757,6 +759,64 @@ async def test_set_mode_refused(
     assert len(events) == seen
 
 
+async def test_writing_counts_towards_the_wait(
+    gateway: WG4Gateway, connect: Callable[[], Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A thermostat that stops reading does not hold a command up for long."""
+    monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 0.05)
+    monkeypatch.setattr(gateway_server, "tcp_state", lambda _writer: "")
+    await _connected(connect)
+
+    async def full() -> None:
+        await asyncio.Event().wait()
+
+    # pylint: disable-next=protected-access
+    monkeypatch.setattr(gateway._links[SERIAL].writer, "drain", full)
+    async with asyncio.timeout(1):
+        with pytest.raises(OJMicrolineTimeoutError, match="did not acknowledge"):
+            await gateway.set_mode(SERIAL, 3, 2250)
+
+
+async def test_recorded_answers_keep_their_numbers_apart(
+    certificate: tuple[Path, Path], events: Events
+) -> None:
+    """The answer to a recorded frame is not taken for that of a command.
+
+    A profile keeps the numbers OJ's gateway gave its answers, which can be
+    the number of the next command.
+    """
+    configuration = encode_frame(
+        encode_field(1, 101) + encode_field(5, 1) + encode_field(10, b"")
+    )
+    gateway = WG4Gateway(
+        server_ssl_context(*certificate),
+        mode=GatewayMode.LOCAL,
+        profiles={SERIAL: DeviceProfile(configuration, PROFILE.support)},
+        listen_host="127.0.0.1",
+        listen_port=0,
+    )
+    gateway.allowed_serials = {SERIAL}
+    gateway.on_state = lambda serial, fields: events.append((serial, fields))
+    await gateway.start()
+    try:
+        assert gateway.port is not None
+        thermostat = await FakeThermostat.connect(gateway.port)
+        await thermostat.login()
+        await thermostat.upload()
+
+        task = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+        assert (await thermostat.receive()).varint(1) == 102
+        # The thermostat answers the recorded frame first.
+        await thermostat.send(acknowledgement(101))
+        await asyncio.sleep(0.02)
+        assert not task.done()
+        await thermostat.send(acknowledgement(102))
+        await task
+        await thermostat.close()
+    finally:
+        await gateway.stop()
+
+
 async def test_closing_a_link_leaves_finished_commands_alone() -> None:
     """Only commands that still wait are told that the thermostat is gone.
 
@@ -787,6 +847,26 @@ async def test_closing_a_link_leaves_finished_commands_alone() -> None:
     with pytest.raises(ConnectionResetError, match="disconnected"):
         waiting.result()
     writer.close.assert_called_once_with()
+
+
+async def test_closing_a_link_logs_nothing_for_a_command_being_sent() -> None:
+    """A command that fails while it is written leaves no unread exception."""
+    loop = asyncio.get_running_loop()
+    reported: list[dict[str, Any]] = []
+    loop.set_exception_handler(lambda _loop, context: reported.append(context))
+    # pylint: disable=protected-access
+    link = gateway_server._Link(SERIAL, MagicMock(spec=asyncio.StreamWriter))
+    link.unanswered.append(
+        gateway_server._Sent(101, lambda: None, loop.create_future())
+    )
+    WG4Gateway._close(link)
+    # pylint: enable=protected-access
+    link.unanswered.clear()
+    del link
+    gc.collect()
+    await asyncio.sleep(0)
+    loop.set_exception_handler(None)
+    assert not reported
 
 
 async def test_set_mode_when_the_thermostat_disconnects(

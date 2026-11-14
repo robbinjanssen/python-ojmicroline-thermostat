@@ -203,6 +203,8 @@ class FakeCloud:
         self.fingerprint = fingerprint
         self.profile = CLOUD_PROFILE
         self.received: list[Message] = []
+        # What it received that is not a message.
+        self.not_understood: list[bytes] = []
         self.connections = 0
         self.hung_up = 0
         self._context = context
@@ -248,7 +250,12 @@ class FakeCloud:
         self._writers.append(writer)
         try:
             while True:
-                message = Message.parse(await read_frame(reader))
+                body = await read_frame(reader)
+                try:
+                    message = Message.parse(body)
+                except ValueError:
+                    self.not_understood.append(body)
+                    continue
                 self.received.append(message)
                 sequence = message.varint(1) or 0
                 kind = message.varint(2)

@@ -40,7 +40,7 @@ from ojmicroline_thermostat.exceptions import (
     OJMicrolineTimeoutError,
 )
 
-from .protobuf import FRAME_MARKER, MAX_FRAME, Message, encode_frame
+from .protobuf import FRAME_MARKER, MAX_FRAME, Message, encode_frame, split_frames
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -54,6 +54,10 @@ LOGIN_TIMEOUT = 30.0
 IDLE_TIMEOUT = 180.0
 # How long a thermostat gets to acknowledge a command.
 ACKNOWLEDGE_TIMEOUT = 10.0
+# How long a late acknowledgement still counts. Thermostats were seen to
+# acknowledge up to 33 seconds late; after this a command counts as lost, so
+# its number cannot take the answer to a later message.
+LATE_ACKNOWLEDGE_TIMEOUT = 60.0
 # How long OJ's gateway gets to accept a connection. A thermostat gives up on
 # its login within a few seconds, so this has to stay well below that; a
 # connection that works takes a fraction of a second.
@@ -500,6 +504,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
 
         """
         loop = asyncio.get_running_loop()
+        self._forget_lost(link)
         sequence = self._next_sequence(link)
         frame = encode_frame(build(sequence))
         sent = _Sent(sequence, accept, loop.create_future(), loop.time())
@@ -511,9 +516,11 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             len(frame),
         )
         try:
-            link.writer.write(frame)
-            await link.writer.drain()
+            # A thermostat that stops reading must not hold the caller up
+            # either, so writing counts towards the wait.
             async with asyncio.timeout(ACKNOWLEDGE_TIMEOUT):
+                link.writer.write(frame)
+                await link.writer.drain()
                 accepted = await cast("asyncio.Future[bool]", sent.waiting)
         except TimeoutError as error:
             network = tcp_state(link.writer)
@@ -532,6 +539,29 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         if not accepted:
             msg = "The thermostat refused the command."
             raise OJMicrolineError(msg)
+
+    def _forget_lost(self, link: _Link, sequence: int | None = None) -> None:
+        """Forget the commands that waited too long for an answer.
+
+        A command that is still waiting keeps its number from a new message.
+        With a sequence, a command with that number is also forgotten once
+        its caller gave up: OJ's gateway uses the number for its own message.
+        """
+        now = asyncio.get_running_loop().time()
+        for sent in list(link.unanswered):
+            if sent.accept is None:
+                continue
+            waited = now - sent.sent_at
+            if waited < LATE_ACKNOWLEDGE_TIMEOUT and (
+                sent.sequence != sequence or waited < ACKNOWLEDGE_TIMEOUT
+            ):
+                continue
+            link.unanswered.remove(sent)
+            self._event(
+                "Thermostat %s never answered command %s; it counts as lost",
+                link.serial,
+                sent.sequence,
+            )
 
     def _next_sequence(self, link: _Link) -> int:
         """Return a number that nothing unanswered on this connection has."""
@@ -660,8 +690,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
                 link.serial,
             )
             return
-        link.writer.write(self._greeting(Message.parse(login)))
-        await link.writer.drain()
+        await self._write(link, self._greeting(Message.parse(login)))
         self._connected(link)
         if self.mode is GatewayMode.LOCAL:
             await self._serve(reader, link)
@@ -675,7 +704,6 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
                 retry.cancel()
 
     async def _serve(self, reader: asyncio.StreamReader, link: _Link) -> None:
-        writer = link.writer
         while True:
             async with asyncio.timeout(IDLE_TIMEOUT):
                 message = Message.parse(await read_frame(reader))
@@ -689,8 +717,27 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             self._observe(link, message)
             answer = self._reply(link, message)
             if answer:
-                writer.write(answer)
-                await writer.drain()
+                await self._write(link, answer)
+
+    async def _write(self, link: _Link, frames: bytes) -> None:
+        """Send a thermostat frames of the gateway's own.
+
+        A recorded answer of OJ's gateway keeps the number OJ's gateway gave
+        it, so what the thermostat has to answer is noted like anything that
+        OJ's gateway sends.
+        """
+        for body in split_frames(frames):
+            self._expect(link, Message.parse(body))
+        link.writer.write(frames)
+        await link.writer.drain()
+
+    def _expect(self, link: _Link, message: Message) -> None:
+        """Note a message the thermostat will answer, before it is sent."""
+        if not self._expects_answer(message):
+            return
+        number = message.varint(_FIELD_SEQUENCE) or 0
+        self._forget_lost(link, number)
+        link.unanswered.append(_Sent(number))
 
     async def _retry_upstream(self, link: _Link) -> None:
         """Make a thermostat connect again once OJ's gateway can be used."""
@@ -711,7 +758,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         """Tell whether a new connection should wait for OJ's gateway.
 
         A thermostat gives up on its login within a few seconds and connects
-        again. Waiting for a gateway that was unreachable a moment ago would
+        again. Waiting for a gateway that could not be used a moment ago would
         keep it from ever being answered, so it is answered locally at once.
         """
         if self._upstream_failed_at is None or not self._can_answer(link.serial):
@@ -721,8 +768,8 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         if waited >= UPSTREAM_RETRY_INTERVAL:
             return True
         self._event(
-            "Not waiting for OJ's gateway for thermostat %s: it was unreachable "
-            "%.0f seconds ago",
+            "Not waiting for OJ's gateway for thermostat %s: it could not be "
+            "used %.0f seconds ago",
             link.serial,
             waited,
         )
@@ -750,14 +797,16 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             self._upstream_failed_at = asyncio.get_running_loop().time()
             self._set_upstream(UpstreamStatus.UNREACHABLE)
             return None
-        self._upstream_failed_at = None
         certificate = writer.get_extra_info("ssl_object").getpeercert(binary_form=True)
         pin = self.endpoint.pin_sha256.replace(":", "").lower()
         self.upstream_fingerprint = hashlib.sha256(certificate or b"").hexdigest()
         if self.upstream_fingerprint != pin:
             writer.close()
+            # Asking again at once would only find the same certificate.
+            self._upstream_failed_at = asyncio.get_running_loop().time()
             self._set_upstream(UpstreamStatus.UNTRUSTED)
             return None
+        self._upstream_failed_at = None
         self._set_upstream(UpstreamStatus.CONNECTED)
         return reader, writer
 
@@ -815,19 +864,45 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         while True:
             async with asyncio.timeout(IDLE_TIMEOUT):
                 body = await read_frame(reader)
+            if self._pass_on(link, body):
+                upstream.write(encode_frame(body))
+                await upstream.drain()
+
+    def _pass_on(self, link: _Link, body: bytes) -> bool:
+        """Look at a message of a relayed thermostat; False if it stays here.
+
+        What the gateway does not understand still goes to OJ's gateway, so a
+        message of a firmware this library does not know cannot cut the
+        thermostat off from it.
+        """
+        try:
             message = Message.parse(body)
-            self._log("Thermostat", link, message)
-            if self._login_serial(message) is not None:
-                msg = "A second login on the same connection"
-                raise ValueError(msg)
-            if self._is_answer(message):
-                if self._answered(link, message):
-                    # OJ's gateway never sent the command this answers.
-                    continue
-            else:
-                self._observe(link, message)
-            upstream.write(encode_frame(body))
-            await upstream.drain()
+        except ValueError:
+            message = None
+        if message is None:
+            self._event(
+                "Thermostat %s sent a message of %s bytes that is not understood",
+                link.serial,
+                len(body),
+            )
+            return True
+        self._log("Thermostat", link, message)
+        if self._login_serial(message) is not None:
+            msg = "A second login on the same connection"
+            raise ValueError(msg)
+        if self._is_answer(message):
+            # The answer to a command of the gateway stays here: OJ's gateway
+            # never sent that command.
+            return not self._answered(link, message)
+        try:
+            self._observe(link, message)
+        except ValueError as error:
+            self._event(
+                "Thermostat %s sent a message that is not understood: %s",
+                link.serial,
+                error,
+            )
+        return True
 
     async def _pass_down(self, upstream: asyncio.StreamReader, link: _Link) -> None:
         """Pass the messages of OJ's gateway on to a thermostat."""
@@ -838,10 +913,9 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
                 message = Message.parse(body)
             except ValueError:
                 message = None
-            if message is not None and self._expects_answer(message):
+            if message is not None:
                 # Noted before it is sent, so the order of the answers holds.
-                number = message.varint(_FIELD_SEQUENCE)
-                link.unanswered.append(_Sent(0 if number is None else number))
+                self._expect(link, message)
             link.writer.write(frame)
             await link.writer.drain()
             # The message is on its way; what follows only looks at it.
@@ -895,6 +969,9 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         for sent in link.unanswered:
             if sent.waiting is not None and not sent.waiting.done():
                 sent.waiting.set_exception(error)
+                # Nobody waits for it when the command was still being sent,
+                # which must not log an exception that was never retrieved.
+                sent.waiting.exception()
         link.writer.close()
         if link.upstream is not None:
             link.upstream.close()

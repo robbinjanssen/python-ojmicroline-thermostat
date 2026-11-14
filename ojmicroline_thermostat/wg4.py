@@ -1,4 +1,3 @@
-# ruff: noqa: PERF401
 """Implementation of OJMicrolineAPI for WG4-series thermostats."""
 
 from __future__ import annotations
@@ -60,36 +59,15 @@ class WG4API(SessionOJMicrolineAPI):
         return {}
 
     def parse_thermostats_response(self, data: Any) -> list[Thermostat]:  # noqa: D102
-        results: list[Thermostat] = []
-        for group in data["Groups"]:
-            for item in group["Thermostats"]:
-                if len(item):
-                    results.append(Thermostat.from_wg4_json(item))
+        return [Thermostat.from_wg4_json(item) for item in self.thermostat_items(data)]
 
-        return results
-
-    async def get_thermostats_json(self) -> dict[str, dict[str, Any]]:
-        """Fetch the thermostats as the API returns them, without energy usage.
-
-        This is what Thermostat.from_wg4_json() takes. It includes the email
-        address of the account.
-
-        Returns
-        -------
-            The JSON of each thermostat, by serial number.
-
-        """
-        data = await self.request(
-            self.get_thermostats_path,
-            method=hdrs.METH_GET,
-            params={"sessionid": self._session_id},
-        )
-        return {
-            str(item["SerialNumber"]): item
+    def thermostat_items(self, data: Any) -> list[dict[str, Any]]:  # noqa: D102
+        return [
+            item
             for group in data["Groups"]
             for item in group["Thermostats"]
             if len(item)
-        }
+        ]
 
     get_energy_usage_path: str = "api/energyusage"
 

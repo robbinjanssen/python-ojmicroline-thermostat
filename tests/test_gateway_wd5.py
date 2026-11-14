@@ -30,6 +30,8 @@ from ojmicroline_thermostat.gateway.protobuf import (
     Message,
     decode_frame,
     encode_field,
+    from_wire,
+    to_wire,
 )
 from ojmicroline_thermostat.gateway.wd5 import (
     NOT_SET,
@@ -48,11 +50,9 @@ from ojmicroline_thermostat.gateway.wd5 import (
     describe,
     encode_date,
     encode_date_time,
-    from_wire,
     is_answer,
     local_in,
     login_answer,
-    to_wire,
     upload_request,
     vacation_mode,
     wants_answer,

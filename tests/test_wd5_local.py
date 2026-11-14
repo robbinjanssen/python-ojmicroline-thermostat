@@ -11,7 +11,7 @@ import json
 import ssl
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import aiohttp
 import pytest
@@ -74,8 +74,17 @@ def _respond(aresponses: ResponsesMockServer, path: str, body: Any) -> None:
 
 
 def _report(gateway: WD5Gateway, serial: str, **fields: Any) -> None:
-    """Let the gateway report something, as if a thermostat sent it."""
+    """Let the gateway report something, as if a thermostat sent it.
+
+    The thermostat counts as connected, answered locally, until it reports
+    that it is offline.
+    """
     assert gateway.on_state is not None
+    links = gateway._links  # pylint: disable=protected-access
+    if fields.get("Online") is False:
+        links.pop(serial, None)
+    else:
+        links.setdefault(serial, Mock(upstream=None))
     gateway.on_state(serial, fields)
 
 
@@ -142,12 +151,30 @@ async def test_fetch_takes_the_snapshot_from_the_cloud(
 async def test_thermostat_that_left_the_gateway_is_offline(
     api: WD5LocalAPI, gateway: WD5Gateway
 ) -> None:
-    """The cloud does not know whether a thermostat is connected here."""
+    """In local mode the cloud does not know whether a thermostat is here."""
+    gateway.mode = GatewayMode.LOCAL
     _report(gateway, SERIAL, Online=True)
     _report(gateway, SERIAL, Online=False)
     assert (await _thermostat(api)).online is False
+    assert api.on_gateway(SERIAL)
+    assert not api.cloud_reaches(SERIAL)
     # A thermostat that never connected here is as the cloud describes it.
     assert (await _thermostat_again(api, OTHER)).online is True
+
+
+async def test_relayed_thermostat_that_left_is_the_clouds(
+    api: WD5LocalAPI, gateway: WD5Gateway
+) -> None:
+    """In relay mode a thermostat that left may talk to OJ's gateway itself.
+
+    Its commands then go through the cloud, which reaches it that way.
+    """
+    _report(gateway, SERIAL, Online=True)
+    assert api.on_gateway(SERIAL)
+    _report(gateway, SERIAL, Online=False)
+    assert not api.on_gateway(SERIAL)
+    assert api.cloud_reaches(SERIAL)
+    assert api.can_set(SERIAL, REGULATION_FROST_PROTECTION)
 
 
 async def _thermostat_again(api: WD5LocalAPI, serial: str) -> Thermostat:
@@ -234,3 +261,47 @@ async def test_other_modes_go_through_the_cloud(
     set_mode = gateway.set_mode
     assert isinstance(set_mode, AsyncMock)
     set_mode.assert_not_awaited()
+
+
+async def test_temperature_outside_the_limits_is_refused(
+    api: WD5LocalAPI, gateway: WD5Gateway
+) -> None:
+    """The thermostat does not check a setpoint, so the API does."""
+    _report(gateway, SERIAL, Online=True)
+    thermostat = await _thermostat(api)
+    for mode in (REGULATION_COMFORT, REGULATION_MANUAL):
+        with pytest.raises(OJMicrolineError, match="outside the limits"):
+            await api.set_regulation_mode(thermostat, mode, 9000, 60)
+        with pytest.raises(OJMicrolineError, match="outside the limits"):
+            await api.set_regulation_mode(thermostat, mode, -500, 60)
+    set_mode = gateway.set_mode
+    assert isinstance(set_mode, AsyncMock)
+    set_mode.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("time_zone", "error"),
+    [(None, "not known"), ("3600", "not known"), (86400, "impossible time zone")],
+)
+async def test_end_needs_the_time_zone(
+    api: WD5LocalAPI, gateway: WD5Gateway, time_zone: Any, error: str
+) -> None:
+    """A comfort hold or a boost cannot end without the time zone."""
+    _report(gateway, SERIAL, Online=True)
+    thermostat = await _thermostat(api)
+    _report(gateway, SERIAL, TimeZone=time_zone)
+    for mode in (REGULATION_COMFORT, REGULATION_BOOST):
+        with pytest.raises(OJMicrolineError, match=error):
+            await api.set_regulation_mode(thermostat, mode, None, 60)
+
+
+async def test_cloud_thermostat_leaves_out_what_it_reported(
+    api: WD5LocalAPI, gateway: WD5Gateway
+) -> None:
+    """A group change starts from the cloud's view of the thermostat."""
+    _report(gateway, SERIAL, Online=True, RegulationMode=REGULATION_COMFORT)
+    assert (await _thermostat(api)).regulation_mode == REGULATION_COMFORT
+    cloud = api.cloud_thermostat(SERIAL)
+    assert cloud is not None
+    assert cloud.regulation_mode == REGULATION_SCHEDULE
+    assert api.cloud_thermostat("0") is None

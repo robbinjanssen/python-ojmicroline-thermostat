@@ -51,7 +51,15 @@ from ojmicroline_thermostat.const import (
     REGULATION_VACATION,
 )
 
-from .protobuf import Message, encode_field, set_field
+from .protobuf import (
+    SETPOINT_SCALE,
+    Message,
+    brief,
+    encode_field,
+    from_wire,
+    set_field,
+    to_wire,
+)
 
 FIELD_SEQUENCE = 1
 FIELD_KIND = 2
@@ -70,9 +78,6 @@ KIND_STATE_UPLOAD = 4
 KIND_SCHEDULE_UPLOAD = 6
 
 EPOCH = datetime(2000, 1, 1, tzinfo=UTC)
-
-# Setpoints on the wire are in 1/200 °C.
-_WIRE_SCALE = 200
 
 _STATE_TIME = 1
 _STATE_MODE = 2
@@ -194,10 +199,10 @@ def decode_state(message: Message) -> dict[str, Any]:
             fields["RegulationMode"] = mode
         setpoints = _hold_setpoints(state)
         for hold, setpoint in setpoints.items():
-            fields[_HOLD_NAMES[hold]] = _from_wire(setpoint)
+            fields[_HOLD_NAMES[hold]] = from_wire(setpoint)
         active = None if mode is None else _HOLD_FIELDS.get(mode)
         if active in setpoints:
-            fields["SetPointTemp"] = _from_wire(setpoints[active])
+            fields["SetPointTemp"] = from_wire(setpoints[active])
     info = message.message(FIELD_DEVICE_INFO)
     if info is not None:
         room = info.data(_INFO_ROOM)
@@ -206,7 +211,7 @@ def decode_state(message: Message) -> dict[str, Any]:
         # The only place where the current setpoint of the schedule shows up.
         target = info.varint(_INFO_TARGET)
         if target is not None:
-            fields["SetPointTemp"] = _from_wire(target)
+            fields["SetPointTemp"] = from_wire(target)
     return fields
 
 
@@ -278,7 +283,7 @@ def changed_state(
     if hold is not None and temperature is not None:
         current = Message.parse(state).data(hold) or b""
         changed = set_field(
-            changed, hold, set_field(current, _HOLD_SETPOINT, _to_wire(temperature))
+            changed, hold, set_field(current, _HOLD_SETPOINT, to_wire(temperature))
         )
     return changed
 
@@ -349,16 +354,6 @@ def describe(message: Message) -> str:
     return " ".join(parts)
 
 
-def _from_wire(setpoint: int) -> int:
-    """Convert a setpoint from the wire to 1/100 °C."""
-    return round(setpoint * 100 / _WIRE_SCALE)
-
-
-def _to_wire(temperature: int) -> int:
-    """Convert a temperature in 1/100 °C to a setpoint on the wire."""
-    return temperature * _WIRE_SCALE // 100
-
-
 def _hold_setpoints(state: Message) -> dict[int, int]:
     """Return the setpoint each hold stores, by the field of the hold."""
     setpoints: dict[int, int] = {}
@@ -372,24 +367,8 @@ def _hold_setpoints(state: Message) -> dict[int, int]:
 
 def _celsius(setpoint: int) -> str:
     """Show a setpoint from the wire in Celsius and Fahrenheit."""
-    celsius = setpoint / _WIRE_SCALE
+    celsius = setpoint / SETPOINT_SCALE
     return f"{celsius:.2f}C/{celsius * 9 / 5 + 32:.1f}F"
-
-
-def _brief(value: int | bytes) -> str:
-    """Show a field that is not interpreted."""
-    if isinstance(value, int):
-        return str(value)
-    try:
-        fields = Message.parse(value).fields
-    except ValueError:
-        return value.hex()
-    shown = (
-        f"{field.number}: "
-        f"{field.value if isinstance(field.value, int) else field.value.hex()}"
-        for field in fields
-    )
-    return "{" + ", ".join(shown) + "}"
 
 
 def _describe_state(message: Message) -> list[str]:
@@ -413,7 +392,7 @@ def _describe_state(message: Message) -> list[str]:
     for field in sorted(state.fields, key=lambda field: field.number):
         if field.number not in shown:
             shown.add(field.number)
-            parts.append(f"{FIELD_STATE}.{field.number}={_brief(field.value)}")
+            parts.append(f"{FIELD_STATE}.{field.number}={brief(field.value)}")
     return parts
 
 

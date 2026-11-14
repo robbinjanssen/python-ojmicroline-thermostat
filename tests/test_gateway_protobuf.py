@@ -16,6 +16,7 @@ from ojmicroline_thermostat.gateway.protobuf import (
     encode_varint,
     read_varint,
     set_field,
+    split_frames,
 )
 
 # A fixed-width field, which the thermostat's known messages do not use.
@@ -187,3 +188,25 @@ def test_decode_frame_rejects_bad_frame(frame: bytes, error: str) -> None:
     """Only exactly one complete frame of a sane size is accepted."""
     with pytest.raises(ValueError, match=error):
         decode_frame(frame)
+
+
+def test_split_frames() -> None:
+    """Frames in a row come apart into their messages."""
+    assert not split_frames(b"")
+    assert split_frames(
+        encode_frame(b"ab") + encode_frame(b"") + encode_frame(b"c")
+    ) == [
+        b"ab",
+        b"",
+        b"c",
+    ]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [b"\x09\x00", b"\x08\x03ab", encode_frame(b"a") + b"\x08"],
+)
+def test_split_frames_rejects_bad_frames(data: bytes) -> None:
+    """Only complete frames are accepted."""
+    with pytest.raises(ValueError, match=r"frame|varint"):
+        split_frames(data)

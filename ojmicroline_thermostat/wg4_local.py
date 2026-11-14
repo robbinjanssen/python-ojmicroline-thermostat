@@ -34,9 +34,9 @@ class WG4LocalAPI(LocalAPI[WG4API, WG4Gateway]):
 
     local_modes = LOCAL_MODES
 
-    def on_gateway(self, serial: str) -> bool:
-        """Tell whether a thermostat connects to the gateway, now or earlier."""
-        return super().on_gateway(serial) or serial in self._gateway.profiles
+    def _known_locally(self, serial: str) -> bool:
+        # A thermostat with a profile was relayed, and can be answered.
+        return super()._known_locally(serial) or serial in self._gateway.profiles
 
     def _parse(self, data: dict[str, Any]) -> Thermostat:
         return Thermostat.from_wg4_json(data)

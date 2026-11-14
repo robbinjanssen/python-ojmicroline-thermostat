@@ -263,3 +263,57 @@ def decode_frame(frame: bytes) -> bytes:
         msg = "The length of the frame does not match its content"
         raise ValueError(msg)
     return frame[offset:]
+
+
+def split_frames(data: bytes) -> list[bytes]:
+    """Return the encoded messages of one or more complete frames in a row.
+
+    Raises
+    ------
+        ValueError: The data is not a row of complete frames.
+
+    """
+    messages = []
+    offset = 0
+    while offset < len(data):
+        if data[offset] != FRAME_MARKER:
+            msg = f"A frame starts with {FRAME_MARKER:#04x}"
+            raise ValueError(msg)
+        size, start = read_varint(data, offset + 1)
+        end = start + size
+        if size > MAX_FRAME or end > len(data):
+            msg = "The length of a frame does not match its content"
+            raise ValueError(msg)
+        messages.append(data[start:end])
+        offset = end
+    return messages
+
+
+# Both series send a setpoint in 1/200 °C.
+SETPOINT_SCALE = 200
+
+
+def from_wire(setpoint: int) -> int:
+    """Convert a setpoint from the wire to 1/100 °C."""
+    return round(setpoint * 100 / SETPOINT_SCALE)
+
+
+def to_wire(temperature: int) -> int:
+    """Convert a temperature in 1/100 °C to a setpoint on the wire."""
+    return temperature * SETPOINT_SCALE // 100
+
+
+def brief(value: int | bytes) -> str:
+    """Show a field that is not interpreted, for a log."""
+    if isinstance(value, int):
+        return str(value)
+    try:
+        fields = Message.parse(value).fields
+    except ValueError:
+        return value.hex()
+    shown = (
+        f"{field.number}: "
+        f"{field.value if isinstance(field.value, int) else field.value.hex()}"
+        for field in fields
+    )
+    return "{" + ", ".join(shown) + "}"

@@ -88,8 +88,17 @@ def _cloud_fails(aresponses: ResponsesMockServer) -> None:
 
 
 def _report(gateway: WG4Gateway, serial: str, **fields: Any) -> None:
-    """Let the gateway report something, as if a thermostat sent it."""
+    """Let the gateway report something, as if a thermostat sent it.
+
+    The thermostat counts as connected, answered locally, until it reports
+    that it is offline.
+    """
     assert gateway.on_state is not None
+    links = gateway._links  # pylint: disable=protected-access
+    if fields.get("Online") is False:
+        links.pop(serial, None)
+    else:
+        links.setdefault(serial, Mock(upstream=None))
     gateway.on_state(serial, fields)
 
 
@@ -315,13 +324,19 @@ async def test_known_thermostat_is_offline_until_it_connects(
     cloud: WG4API,
     gateway: WG4Gateway,
 ) -> None:
-    """A thermostat with a profile is online when the gateway says so.
+    """In local mode, a thermostat with a profile is online when it connects.
 
     The cloud calls it online in its snapshot, but the cloud cannot know
     whether a thermostat is connected to this gateway.
     """
     gateway.profiles[SERIAL] = PROFILE
     client, _ = _client(WG4LocalAPI(cloud, gateway, snapshot=_snapshot()), session)
+    # In relay mode a thermostat that is not connected may talk to OJ's
+    # gateway directly, so the cloud's word holds.
+    _cloud_fails(aresponses)
+    assert _by_serial(await client.get_thermostats())[SERIAL].online is True
+
+    gateway.mode = GatewayMode.LOCAL
     _cloud_fails(aresponses)
     thermostats = _by_serial(await client.get_thermostats())
     assert thermostats[SERIAL].online is False
@@ -344,13 +359,29 @@ async def test_supported_regulation_modes(
 ) -> None:
     """Without the cloud, a thermostat on the gateway has two modes."""
     cloud_modes = [REGULATION_SCHEDULE, REGULATION_COMFORT, REGULATION_MANUAL]
-    client, _ = _client(WG4LocalAPI(cloud, gateway, snapshot=_snapshot()), session)
+    client, api = _client(WG4LocalAPI(cloud, gateway, snapshot=_snapshot()), session)
     _report(gateway, SERIAL, Online=True)
+    link = gateway._links[SERIAL]  # pylint: disable=protected-access
 
-    # While it can be relayed, the cloud sets the modes the gateway cannot.
+    # While it is relayed, the cloud sets the modes the gateway cannot.
+    link.upstream = Mock()
     _cloud_fails(aresponses)
     thermostats = _by_serial(await client.get_thermostats())
     assert thermostats[SERIAL].supported_regulation_modes == cloud_modes
+    assert api.can_set(SERIAL, REGULATION_COMFORT)
+
+    # Answered locally, because OJ's gateway cannot be used, or in local mode.
+    link.upstream = None
+    _cloud_fails(aresponses)
+    thermostats = _by_serial(await client.get_thermostats())
+    assert thermostats[SERIAL].supported_regulation_modes == [
+        REGULATION_SCHEDULE,
+        REGULATION_MANUAL,
+    ]
+    assert not api.can_set(SERIAL, REGULATION_COMFORT)
+    assert api.can_set(SERIAL, REGULATION_MANUAL)
+    assert not api.cloud_reaches(SERIAL)
+    assert api.cloud_reaches(OTHER)
 
     gateway.mode = GatewayMode.LOCAL
     _cloud_fails(aresponses)
@@ -391,6 +422,34 @@ async def test_notifications(
     # A report about a thermostat that is not on the account is no news.
     _report(gateway, "7654321", Online=True)
     assert await api.get_notifications() == []
+
+
+async def test_new_subscriber_gets_every_thermostat(
+    session: aiohttp.ClientSession, cloud: WG4API, gateway: WG4Gateway
+) -> None:
+    """Another task that waits for notifications starts with every thermostat.
+
+    OJMicroline starts a new task when it subscribes again, which has to
+    catch up on what it missed.
+    """
+    _, api = _client(WG4LocalAPI(cloud, gateway, snapshot=_snapshot()), session)
+    assert len(await asyncio.create_task(api.get_notifications())) == 2
+    assert len(await asyncio.create_task(api.get_notifications())) == 2
+
+
+async def test_thermostat_that_cannot_be_read_is_skipped(
+    session: aiohttp.ClientSession,
+    cloud: WG4API,
+    gateway: WG4Gateway,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One thermostat that cannot be read does not hold up the others."""
+    snapshot = _snapshot()
+    del snapshot[OTHER]["SerialNumber"]
+    _, api = _client(WG4LocalAPI(cloud, gateway, snapshot=snapshot), session)
+    thermostats = await api.get_notifications()
+    assert [thermostat.serial_number for thermostat in thermostats] == [SERIAL]
+    assert f"The data of thermostat {OTHER} cannot be read" in caplog.text
 
 
 async def test_set_regulation_mode_on_the_gateway(
@@ -487,6 +546,24 @@ async def test_get_energy_usage(
     usage = await client.get_energy_usage(thermostat)
 
     assert len(usage) == 7
+    aresponses.assert_plan_strictly_followed()
+
+
+async def test_expired_session_is_renewed_once(
+    aresponses: ResponsesMockServer,
+    session: aiohttp.ClientSession,
+    cloud: WG4API,
+    gateway: WG4Gateway,
+) -> None:
+    """OJMicroline renews an expired session, as it does for every API."""
+    client, api = _client(WG4LocalAPI(cloud, gateway, snapshot=_snapshot()), session)
+    thermostat = _by_serial(await api.get_notifications())[SERIAL]
+    _respond(aresponses, "/api/authenticate/user", {"SessionId": "s1", "ErrorCode": 0})
+    aresponses.add(HOST, "/api/energyusage", "GET", Response(status=401))
+    _respond(aresponses, "/api/authenticate/user", {"SessionId": "s2", "ErrorCode": 0})
+    _respond(aresponses, "/api/energyusage", load_fixtures("wg4_energy.json"))
+
+    assert len(await client.get_energy_usage(thermostat)) == 7
     aresponses.assert_plan_strictly_followed()
 
 

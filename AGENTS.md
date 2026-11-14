@@ -95,7 +95,10 @@ work on a branch.
     its subclass, not into a check on the series.
   - A thermostat answers in the order it received. Match its answer through
     `_Link.unanswered`, never by number alone: OJ's gateway and this one can
-    use the same number.
+    use the same number. Everything the thermostat has to answer goes in
+    there before it is sent, also a frame repeated from a profile.
+  - In relay mode a message that cannot be read still goes to OJ's gateway;
+    only the gateway's own commands and their answers stay local.
   - A command takes effect when the thermostat accepts it, in the `accept`
     callback of `_send_command()`, also when that is after the caller's wait.
   - A thermostat gives up on its login within seconds. Nothing between its

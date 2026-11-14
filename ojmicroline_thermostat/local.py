@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from .const import REGULATION_MANUAL
 from .exceptions import (
     OJMicrolineError,
     OJMicrolineTimeoutError,
@@ -93,7 +92,9 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         self._live: dict[str, dict[str, Any]] = {}
         self._changed: set[str] = set()
         self._wake = asyncio.Event()
-        self._subscribed = False
+        # The task that waits for notifications. Another task is a new
+        # subscriber, which gets every thermostat first.
+        self._subscriber: asyncio.Task[Any] | None = None
         gateway.allowed_serials = set(self._snapshot)
         gateway.on_state = self._on_state
 
@@ -166,7 +167,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         For a thermostat on the gateway, the modes in local_modes go straight
         to the thermostat. Other modes go through the cloud API, which only
         reaches the thermostat while the gateway relays it. A thermostat that
-        never connected to the gateway is set through the cloud API.
+        is not on the gateway is set through the cloud API; see can_set().
 
         Args:
         ----
@@ -188,12 +189,9 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         serial = resource.serial_number
         if self.on_gateway(serial):
             if regulation_mode in self.local_modes:
-                if (
-                    regulation_mode == REGULATION_MANUAL
-                    and temperature is not None
-                    and not resource.min_temperature
-                    <= temperature
-                    <= resource.max_temperature
+                # The cloud API checks a temperature; the thermostat does not.
+                if temperature is not None and not (
+                    resource.min_temperature <= temperature <= resource.max_temperature
                 ):
                     msg = "The temperature is outside the limits of the thermostat."
                     raise OJMicrolineError(msg)
@@ -201,7 +199,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
                     resource, regulation_mode, temperature, duration
                 )
                 return True
-            if not self._gateway.is_relayed(serial):
+            if not self.cloud_reaches(serial):
                 msg = (
                     "This mode is set through the cloud, which the thermostat is "
                     "not connected to."
@@ -216,29 +214,70 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
     async def get_notifications(self) -> list[Thermostat]:
         """Wait until a thermostat on the gateway reports something.
 
+        Only the thermostats on the gateway report here. A thermostat that is
+        served by the cloud API changes through get_thermostats() only, so
+        keep polling that.
+
         Returns
         -------
-            Every thermostat on the first call, and afterwards the thermostats
-            that reported since the last call.
+            Every thermostat on the first call of a task that waits for
+            notifications, and afterwards the thermostats that reported since
+            the last call.
 
         """
-        if not self._subscribed:
-            self._subscribed = True
+        task = asyncio.current_task()
+        if task is not self._subscriber:
+            self._subscriber = task
             changed = set(self._snapshot)
         else:
             await self._wake.wait()
-            changed = self._changed
+            changed = set(self._changed)
         self._wake.clear()
-        self._changed = set()
-        return [
-            self._thermostat(serial)
-            for serial in sorted(changed)
-            if serial in self._snapshot
-        ]
+        self._changed -= changed
+        thermostats = []
+        for serial in sorted(changed & set(self._snapshot)):
+            try:
+                thermostats.append(self._thermostat(serial))
+            except (KeyError, TypeError, ValueError):
+                # One thermostat that cannot be read must not hold up others.
+                _LOGGER.warning(
+                    "The data of thermostat %s cannot be read", serial, exc_info=True
+                )
+        return thermostats
 
     def on_gateway(self, serial: str) -> bool:
-        """Tell whether a thermostat connects to the gateway, now or earlier."""
-        return serial in self._live
+        """Tell whether a thermostat is served by the gateway.
+
+        That is a thermostat that is connected to it now, and in local mode
+        also one that was connected before: it does not reach the cloud.
+        """
+        if serial in self._gateway.connected:
+            return True
+        return self._gateway.mode is GatewayMode.LOCAL and self._known_locally(serial)
+
+    def cloud_reaches(self, serial: str) -> bool:
+        """Tell whether a change through the cloud API reaches a thermostat.
+
+        It does for a thermostat that is not on the gateway, and for one that
+        the gateway relays to OJ's gateway.
+        """
+        return not self.on_gateway(serial) or self._gateway.is_relayed(serial)
+
+    def cloud_thermostat(self, serial: str) -> Thermostat | None:
+        """Return a thermostat as the cloud API described it last.
+
+        That leaves out what the thermostat reported to the gateway, such as
+        a mode that was set on it alone. A change of its group in the cloud
+        starts from this.
+        """
+        data = self._snapshot.get(serial)
+        return None if data is None else self._parse(dict(data))
+
+    def can_set(self, serial: str, regulation_mode: int) -> bool:
+        """Tell whether set_regulation_mode() can set a mode right now."""
+        if self.on_gateway(serial) and regulation_mode in self.local_modes:
+            return True
+        return self.cloud_reaches(serial)
 
     # --- What a series does differently ---------------------------------------
 
@@ -255,6 +294,10 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         duration: int,
     ) -> None:
         """Send one of the local modes to a thermostat on the gateway."""
+
+    def _known_locally(self, serial: str) -> bool:
+        """Tell whether a thermostat was served by the gateway before."""
+        return serial in self._live
 
     # --- What the series share --------------------------------------------------
 
@@ -273,7 +316,8 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
             data["Online"] = False
             data.update(self._live.get(serial, {}))
         thermostat = self._parse(data)
-        if on_gateway and self._gateway.mode is GatewayMode.LOCAL:
+        if not self.cloud_reaches(serial):
+            # Only the gateway reaches the thermostat now.
             thermostat.supported_regulation_modes = list(self.local_modes)
         return thermostat
 
@@ -281,7 +325,11 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         """Fetch a new snapshot from the cloud API, if it answers in time."""
         try:
             async with asyncio.timeout(CLOUD_TIMEOUT):
-                snapshot = await self._cloud(self.cloud.get_thermostats_json)
+                try:
+                    snapshot = await self._cloud(self.cloud.get_thermostats_json)
+                except OJMicrolineUnauthorizedError:
+                    # The session expired; _cloud() logs in anew.
+                    snapshot = await self._cloud(self.cloud.get_thermostats_json)
         except TimeoutError as error:
             msg = "The cloud API did not answer in time."
             self.cloud_error = OJMicrolineTimeoutError(msg)
@@ -309,11 +357,15 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
             )
 
     async def _cloud(self, call: Callable[[], Awaitable[_T]]) -> _T:
-        """Log in to the cloud API and call it, once more if the session expired."""
+        """Log in to the cloud API and call it.
+
+        login() of this API does nothing, so the cloud API logs in here. When
+        its session expired, the session is forgotten: OJMicroline calls
+        again, as it does for every API, and that call logs in anew.
+        """
         await self.cloud.login()
         try:
             return await call()
         except OJMicrolineUnauthorizedError:
             self.cloud.invalidate_session()
-            await self.cloud.login()
-            return await call()
+            raise

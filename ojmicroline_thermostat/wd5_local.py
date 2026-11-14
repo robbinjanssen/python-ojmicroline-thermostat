@@ -11,6 +11,7 @@ from .const import (
     REGULATION_MANUAL,
     REGULATION_SCHEDULE,
 )
+from .exceptions import OJMicrolineError
 from .gateway import WD5Gateway
 from .gateway.wd5 import local_in
 from .local import LocalAPI
@@ -70,8 +71,16 @@ class WD5LocalAPI(LocalAPI[WD5API, WD5Gateway]):
         end = None
         if minutes is not None:
             # The thermostat counts in its own time zone, which the cloud API
-            # tells for every thermostat.
-            end = local_in(minutes, known["TimeZone"])
+            # tells for every thermostat, and the thermostat itself as well.
+            time_zone = known.get("TimeZone")
+            if not isinstance(time_zone, int):
+                msg = "The time zone of the thermostat is not known."
+                raise OJMicrolineError(msg)
+            try:
+                end = local_in(minutes, time_zone)
+            except ValueError as error:
+                msg = f"The thermostat reports an impossible time zone: {error}"
+                raise OJMicrolineError(msg) from error
         await self._gateway.set_mode(
             serial, regulation_mode, temperature, end=end, known=known
         )

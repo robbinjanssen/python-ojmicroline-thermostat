@@ -120,7 +120,14 @@ an acknowledgement to the oldest message with its number. Once the thermostat
 accepts a command, the state of that command is the basis for the next one and
 is reported as the new state. That also holds for an acknowledgement that
 comes after the 10 seconds: the caller got an error by then, but the
-thermostat did change.
+thermostat did change. After 60 seconds a command without an answer counts as
+lost, and so does one whose 10 seconds are over once OJ's gateway sends a
+message with its number. Its number then cannot take the answer to a later
+message.
+
+The answers the gateway repeats from a profile keep the numbers OJ's gateway
+gave them. The gateway keeps them among what the thermostat has to answer, as
+it does for the messages of OJ's gateway.
 
 A command is only sent to a thermostat that is connected and has uploaded its
 state. It is never kept for later.
@@ -134,7 +141,9 @@ hostname now leads to the gateway itself. It compares the certificate with the
 pinned fingerprint before it sends anything, and passes nothing on if they
 differ. After that every frame goes on unchanged in both directions, with one
 exception: the thermostat's acknowledgement of a command of the gateway is not
-passed on, because OJ's gateway never sent that command.
+passed on, because OJ's gateway never sent that command. A message the gateway
+cannot read goes on as well, so a firmware it does not know keeps its link to
+OJ's gateway.
 
 A change made in the vendor's app reaches the thermostat as a command of OJ's
 gateway, in the shape described above. The gateway reports it as the new
@@ -153,8 +162,9 @@ minutes, and disconnects the thermostat once it works, so the thermostat
 connects again and is relayed.
 
 OJ's gateway gets 3 seconds to accept a connection. For five minutes after it
-could not be reached, a thermostat with a profile is answered locally at once,
-without another attempt. Seen: with a wait of 10 seconds on every new
+could not be reached, or showed a certificate that does not match the pin, a
+thermostat with a profile is answered locally at once, without another
+attempt. Seen: with a wait of 10 seconds on every new
 connection, a thermostat was never answered while OJ's gateway was
 unreachable, because it gives up on its login sooner than that.
 

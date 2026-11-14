@@ -66,7 +66,15 @@ from ojmicroline_thermostat.const import (
     REGULATION_VACATION,
 )
 
-from .protobuf import LENGTH_DELIMITED, Message, encode_field, set_field
+from .protobuf import (
+    LENGTH_DELIMITED,
+    Message,
+    brief,
+    encode_field,
+    from_wire,
+    set_field,
+    to_wire,
+)
 from .wg4 import device_time
 
 if TYPE_CHECKING:
@@ -85,9 +93,6 @@ FIELD_SERVER_TIME = 12
 
 # What a day or an end that is not set decodes to.
 NOT_SET = "1970-01-01T00:00:00"
-
-# Setpoints on the wire are in 1/200 °C.
-_WIRE_SCALE = 200
 
 _LOGIN_SERIAL = 1
 _LOGIN_DEVICE_TYPE = 2
@@ -225,16 +230,6 @@ class Vacation:
     enabled: bool
     begin: date | None = None
     end: date | None = None
-
-
-def from_wire(setpoint: int) -> int:
-    """Convert a setpoint from the wire to 1/100 °C."""
-    return round(setpoint * 100 / _WIRE_SCALE)
-
-
-def to_wire(temperature: int) -> int:
-    """Convert a temperature in 1/100 °C to a setpoint on the wire."""
-    return temperature * _WIRE_SCALE // 100
 
 
 def decode_login(message: Message) -> Login | None:
@@ -918,22 +913,6 @@ def _shown(name: str, value: Any) -> str:
     return str(value)
 
 
-def _brief(value: int | bytes) -> str:
-    """Show a field that is not interpreted."""
-    if isinstance(value, int):
-        return str(value)
-    try:
-        fields = Message.parse(value).fields
-    except ValueError:
-        return value.hex()
-    shown = (
-        f"{field.number}: "
-        f"{field.value if isinstance(field.value, int) else field.value.hex()}"
-        for field in fields
-    )
-    return "{" + ", ".join(shown) + "}"
-
-
 def _uninterpreted(
     message: Message, number: int, interpreted: frozenset[int]
 ) -> list[str]:
@@ -944,5 +923,5 @@ def _uninterpreted(
     for field in sorted(nested.fields, key=lambda field: field.number):
         if field.number not in shown:
             shown.add(field.number)
-            parts.append(f"{number}.{field.number}={_brief(field.value)}")
+            parts.append(f"{number}.{field.number}={brief(field.value)}")
     return parts

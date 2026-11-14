@@ -390,6 +390,11 @@ thermostat (`on_profile`) and the snapshot (`on_snapshot`). The snapshot is the
 last answer of the cloud API, which keeps the thermostats usable when the cloud
 cannot be reached. It holds the email address of the account.
 
+Notifications come from the thermostats on the gateway only. A thermostat
+that the cloud API serves, or a change made in the vendor's app while a
+thermostat is not relayed, shows up in `get_thermostats()`, so keep calling
+that now and then.
+
 For the WD5 series the example is the same without the profiles:
 
 ```python
@@ -429,7 +434,10 @@ And both APIs these:
 | :----- | :---------- |
 | `cloud_error` | Why the cloud API could not be used when the thermostats were last fetched, or `None`. |
 | `cloud` | The cloud API (`WG4API` or `WD5API`), for cloud-only calls such as `WG4API.set_energy_price`. |
-| `on_gateway(serial)` | Whether a thermostat connects to the gateway, now or earlier. |
+| `on_gateway(serial)` | Whether the gateway serves a thermostat: it is connected now, or, in local mode, it was before. |
+| `cloud_reaches(serial)` | Whether a change through the cloud API reaches a thermostat: it is not on the gateway, or it is relayed. |
+| `can_set(serial, mode)` | Whether `set_regulation_mode()` can set a mode right now. |
+| `cloud_thermostat(serial)` | A thermostat as the cloud API described it last, without what it reported to the gateway. |
 | `local_modes` | The regulation modes the gateway sets by itself. |
 
 Every device on your network can reach the gateway's port. The gateway only
