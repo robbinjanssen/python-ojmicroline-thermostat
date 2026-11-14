@@ -605,6 +605,8 @@ async def test_set_mode_without_acknowledgement(
 ) -> None:
     """A command the thermostat does not confirm in time fails."""
     monkeypatch.setattr(gateway_server, "ACKNOWLEDGE_TIMEOUT", 0.05)
+    # Linux adds the state of the connection, which has its own test.
+    monkeypatch.setattr(gateway_server, "tcp_state", lambda _writer: "")
     thermostat = await _connected(connect)
     seen = len(events)
 
