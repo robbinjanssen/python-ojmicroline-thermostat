@@ -1,4 +1,4 @@
-# ruff: noqa: PLR0913, PERF401
+# ruff: noqa: PLR0913
 # pylint: disable=too-many-arguments
 """Implementation of OJMicrolineAPI for WD5-series thermostats."""
 
@@ -69,17 +69,18 @@ class WD5API(SessionOJMicrolineAPI):
         return {"APIKEY": self.api_key}
 
     def parse_thermostats_response(self, data: Any) -> list[Thermostat]:  # noqa: D102
+        return [Thermostat.from_wd5_json(item) for item in self.thermostat_items(data)]
+
+    def thermostat_items(self, data: Any) -> list[dict[str, Any]]:  # noqa: D102
         if data["ErrorCode"] == 1:
             msg = "Unable to get thermostats via API."
             raise OJMicrolineResultsError(msg, {"data": data})
-
-        results: list[Thermostat] = []
-        for group in data["GroupContents"]:
-            for item in group["Thermostats"]:
-                if len(item):
-                    results.append(Thermostat.from_wd5_json(item))
-
-        return results
+        return [
+            item
+            for group in data["GroupContents"]
+            for item in group["Thermostats"]
+            if len(item)
+        ]
 
     get_energy_usage_path: str = "api/EnergyUsage/GetEnergyUsage"
 

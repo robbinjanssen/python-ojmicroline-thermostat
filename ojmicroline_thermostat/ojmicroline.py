@@ -148,6 +148,38 @@ class SessionOJMicrolineAPI:
         """Parse an HTTP response containing thermostat data."""
         raise NotImplementedError
 
+    def thermostat_items(self, data: Any) -> list[dict[str, Any]]:
+        """Return the JSON of each thermostat in a response, as the API sent it.
+
+        Raises
+        ------
+            OJMicrolineResultsError: The API reported an error.
+
+        """
+        raise NotImplementedError
+
+    async def get_thermostats_json(self) -> dict[str, dict[str, Any]]:
+        """Fetch the thermostats as the API returns them, without energy usage.
+
+        This is what the Thermostat model of the series is parsed from. The
+        JSON of a WG4 thermostat includes the email address of the account.
+
+        Returns
+        -------
+            The JSON of each thermostat, by serial number.
+
+        Raises
+        ------
+            OJMicrolineResultsError: The API reported an error.
+
+        """
+        data = await self.request(
+            self.get_thermostats_path,
+            method=hdrs.METH_GET,
+            params={"sessionid": self._session_id, **self.get_thermostats_params()},
+        )
+        return {str(item["SerialNumber"]): item for item in self.thermostat_items(data)}
+
     def parse_energy_usage_response(self, data: Any) -> list[float]:
         """Parse an HTTP response containing energy usage data."""
         raise NotImplementedError

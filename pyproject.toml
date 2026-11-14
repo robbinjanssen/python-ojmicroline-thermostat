@@ -6,7 +6,7 @@ description = "Asynchronous Python client controlling an OJ Microline Thermostat
 authors = [{ name = "Robbin Janssen", email = "robbinjanssen@gmail.com" }]
 maintainers = [{ name = "Robbin Janssen", email = "robbinjanssen@gmail.com" }]
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "ojmicroline_thermostat/gateway/LICENSE"]
 readme = "README.md"
 keywords = ["async", "client", "thermostat", "ojmicroline"]
 classifiers = [
@@ -49,6 +49,7 @@ dev = [
     "pytest-cov==7.1.0",
     "pytz==2026.5",
     "ruff==0.16.10",
+    "trustme==1.2.1",
     "types-pytz==2026.5.0.20261006",
     "yamllint==1.38.0",
 ]
