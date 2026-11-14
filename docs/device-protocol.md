@@ -12,16 +12,20 @@ The WG4 field numbers are as observed by
 with frames captured from real thermostats.
 
 This library has run against one real WG4 thermostat, with firmware 1012M201,
-on 13 November 2026 (the report is in
+on 13 and 14 November 2026 (the reports are in
 [pull request 478 of the Home Assistant integration](https://github.com/robbinjanssen/home-assistant-ojmicroline-thermostat/pull/478)).
 What that showed is marked as seen. A point marked as reported comes from the
 same thermostat, but from its owner's own gateway and captures.
 
 Seen to work: the TLS connection with a self-signed certificate, the relay,
-recording the profile, a change through the cloud arriving as a command, and
-answering the thermostat locally. Seen to fail: the thermostat acknowledged
-the commands of this gateway 13 to 33 seconds after they were sent, which was
-too late for the gateway. Why is an [open question](#open-questions).
+recording the profile, a change through the cloud arriving as a command,
+answering the thermostat locally, answering it locally while OJ's gateway was
+unreachable, and relaying it again once OJ's gateway was back.
+
+On 13 November the thermostat acknowledged the commands of this gateway 13
+to 33 seconds after they were sent, which was too late for the gateway. On 14
+November it acknowledged 15 of the same commands within 0.8 to 2.5 seconds,
+relayed and answered locally. Why is an [open question](#open-questions).
 
 ## Transport
 
@@ -32,8 +36,10 @@ too late for the gateway. Why is an [open question](#open-questions).
   seconds. An answer that came 3.6 seconds after it connected was too late,
   one after 0.4 seconds was in time.
 - Seen: a heartbeat that is not acknowledged is sent again after 5 seconds
-  with the next sequence number. After four of them the thermostat connects
-  again.
+  with the next sequence number. Five seconds after the fourth, the
+  thermostat closes the connection and connects again. Seen on 14 November
+  when OJ's gateway stopped answering: the gateway then answered the new
+  connection locally within 3 seconds.
 - OJ's gateway presents a self-signed certificate. `WG4_NORTH_AMERICA` holds
   its SHA-256 fingerprint, read on 9 November 2026 from a certificate that is
   valid until 2114.
@@ -159,7 +165,9 @@ gateway repeated them.
 If OJ's gateway cannot be reached or is not trusted, a thermostat with a
 profile is answered locally. The gateway then tries OJ's gateway every five
 minutes, and disconnects the thermostat once it works, so the thermostat
-connects again and is relayed.
+connects again and is relayed. Seen: the thermostat connected again about 60
+seconds after the gateway closed its connection, and could not be reached in
+between.
 
 OJ's gateway gets 3 seconds to accept a connection. For five minutes after it
 could not be reached, or showed a certificate that does not match the pin, a
@@ -184,9 +192,13 @@ These need a real thermostat to answer.
   repeated its commands. Reported: the owner's own gateway sends the same
   command and gets its acknowledgement within 10 seconds. The delays fit the
   moments at which the system sends a TCP segment again, which would mean
-  that the command does not reach the thermostat at first. The event of a
-  command that timed out therefore tells the state of the TCP connection,
-  and that of an acknowledgement tells its value.
+  that the command does not reach the thermostat at first. A thermostat that
+  stops reading its connection while it handles the command fits too. The
+  event of a command that timed out therefore tells the state of the TCP
+  connection, which tells these apart, and that of an acknowledgement tells
+  its value. Seen on 14 November: the same commands, built and sent the same
+  way, were all acknowledged within 2.5 seconds, so no TCP state of a timeout
+  is known yet.
 - Does OJ's gateway send the configuration and support answers on every new
   connection? Seen: on each of three connections of a thermostat that was
   already set up.

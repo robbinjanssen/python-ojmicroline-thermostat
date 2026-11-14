@@ -87,8 +87,9 @@ work on a branch.
   `mypy.ini`.
 - **Gateway**: the protocol has no specification; `docs/device-protocol.md`
   lists what is known and what is not, and marks what was seen on a real
-  thermostat. The WG4 gateway has run against one, with commands that were
-  acknowledged too late; the WD5 gateway has not. Do not present either as
+  thermostat. The WG4 gateway has run against one, twice: the first time its
+  commands were acknowledged too late, the second time in time, for a reason
+  that is not known. The WD5 gateway has not. Do not present either as
   verified.
   - `DeviceGateway` knows no field of a series besides the sequence number
     and the acknowledgement. What differs per series goes into the hooks of
