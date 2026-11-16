@@ -13,6 +13,7 @@ in this package.
 
 from .profile import DeviceProfile
 from .server import (
+    WD5_OJ001,
     WD5_R1099,
     WD5_SL003,
     WG4_NORTH_AMERICA,
@@ -28,6 +29,7 @@ from .wd5_gateway import WD5Gateway
 from .wg4_gateway import ProfileListener, WG4Gateway
 
 __all__ = [
+    "WD5_OJ001",
     "WD5_R1099",
     "WD5_SL003",
     "WG4_NORTH_AMERICA",

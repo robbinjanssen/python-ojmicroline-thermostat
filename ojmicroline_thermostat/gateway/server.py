@@ -144,8 +144,9 @@ WG4_NORTH_AMERICA = GatewayEndpoint(
 )
 
 # WD5-series thermostats look for a hostname that holds the customer ID of
-# their brand. The two names below lead to the same gateway, whose certificate
-# is valid until 2044; address and fingerprint were read on 14 November 2026.
+# their brand. The names below lead to the same gateway, whose certificate is
+# valid until 2044; address and fingerprint were read on 14 and 16 November
+# 2026.
 _WD5_ADDRESS = "40.68.93.45"
 _WD5_PIN = "2c57953b72eb63c3266999ade32ce5857e0ea2867c4297cb254c397e4fa82e30"
 # Customer 99, the SWATT app: seen in the DNS requests of an OWD5 thermostat.
@@ -159,6 +160,14 @@ WD5_R1099 = GatewayEndpoint(
 # package takes the WD5 protocol from.
 WD5_SL003 = GatewayEndpoint(
     host="owd5-sl003-thermostat.ojelectronics.com",
+    port=9513,
+    upstream_ip=_WD5_ADDRESS,
+    pin_sha256=_WD5_PIN,
+)
+# Customer 1, the OJ Microline app (OWD5): seen in the DNS requests of a
+# tester's OWD5 thermostat.
+WD5_OJ001 = GatewayEndpoint(
+    host="owd5-oj001-thermostat.ojelectronics.com",
     port=9513,
     upstream_ip=_WD5_ADDRESS,
     pin_sha256=_WD5_PIN,

@@ -245,9 +245,15 @@ ID of its brand:
 | --- | --- | --- |
 | `owd5-r1099-thermostat.ojelectronics.com` | Customer 99, the SWATT app | Seen in the DNS requests of an OWD5 thermostat |
 | `owd5-sl003-thermostat.ojelectronics.com` | Customer 3, Schlüter in Europe | Reported by the ioBroker adapter |
+| `owd5-oj001-thermostat.ojelectronics.com` | Customer 1, the OJ Microline app (OWD5) | Seen in the DNS requests of an OWD5 thermostat |
 
-On 14 November 2026 both names led to the same address, with one certificate
-that is valid until 2044. The hostnames of other brands are not known.
+On 14 and 16 November 2026 these names led to the same address, with one
+certificate that is valid until 2044. The hostnames of other brands are not
+known.
+
+A brand's cloud API has a hostname of its own, such as
+`owd5-sl003-app.ojelectronics.com`. That is the name the apps and this
+library's `WD5API` use, not the one the thermostat looks for.
 
 ### Messages
 

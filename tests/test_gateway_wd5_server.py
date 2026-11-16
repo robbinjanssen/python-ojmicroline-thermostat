@@ -20,7 +20,9 @@ from ojmicroline_thermostat.const import (
     REGULATION_SCHEDULE,
 )
 from ojmicroline_thermostat.gateway import (
+    WD5_OJ001,
     WD5_R1099,
+    WD5_SL003,
     GatewayEndpoint,
     GatewayMode,
     WD5Gateway,
@@ -131,6 +133,20 @@ def test_default_endpoint(certificate: tuple[Path, Path]) -> None:
     gateway = WD5Gateway(server_ssl_context(*certificate), mode=GatewayMode.LOCAL)
     assert gateway.endpoint is WD5_R1099
     assert gateway.endpoint.port == 9513
+
+
+def test_brands_share_one_gateway() -> None:
+    """The hostname holds the customer ID; all lead to the same gateway."""
+    hosts = {endpoint.host for endpoint in (WD5_R1099, WD5_SL003, WD5_OJ001)}
+    assert hosts == {
+        "owd5-r1099-thermostat.ojelectronics.com",
+        "owd5-sl003-thermostat.ojelectronics.com",
+        "owd5-oj001-thermostat.ojelectronics.com",
+    }
+    for endpoint in (WD5_SL003, WD5_OJ001):
+        assert endpoint.port == WD5_R1099.port
+        assert endpoint.upstream_ip == WD5_R1099.upstream_ip
+        assert endpoint.pin_sha256 == WD5_R1099.pin_sha256
 
 
 async def test_local_session(

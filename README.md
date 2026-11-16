@@ -291,7 +291,7 @@ reads and sets the thermostat without the cloud.
 | Series | Hostname the thermostat looks for | Port | Gateway | API |
 | :----- | :-------------------------------- | :--- | :------ | :-- |
 | WG4 | `na-thermos.ojelectronics.com` (`WG4_NORTH_AMERICA`) | 9533 | `WG4Gateway` | `WG4LocalAPI` |
-| WD5 | `owd5-r1099-thermostat.ojelectronics.com` for the SWATT app (`WD5_R1099`), `owd5-sl003-thermostat.ojelectronics.com` for Schlüter in Europe (`WD5_SL003`) | 9513 | `WD5Gateway` | `WD5LocalAPI` |
+| WD5 | `owd5-r1099-thermostat.ojelectronics.com` for the SWATT app (`WD5_R1099`), `owd5-sl003-thermostat.ojelectronics.com` for Schlüter in Europe (`WD5_SL003`), `owd5-oj001-thermostat.ojelectronics.com` for the OJ Microline app (`WD5_OJ001`) | 9513 | `WD5Gateway` | `WD5LocalAPI` |
 
 This is experimental. The WG4 gateway has run against one real thermostat.
 The connection, the relay, recording the profile, answering the thermostat

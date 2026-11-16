@@ -9,6 +9,7 @@ from .exceptions import (
     OJMicrolineUnauthorizedError,
 )
 from .gateway import (
+    WD5_OJ001,
     WD5_R1099,
     WD5_SL003,
     WG4_NORTH_AMERICA,
@@ -31,6 +32,7 @@ from .wg5 import WG5API
 
 __all__ = [
     "WD5API",
+    "WD5_OJ001",
     "WD5_R1099",
     "WD5_SL003",
     "WG4API",
