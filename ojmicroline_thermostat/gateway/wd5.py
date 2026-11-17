@@ -413,7 +413,9 @@ def decode_state(message: Message) -> dict[str, Any]:
             "FrostProtectionTemperature": _setpoint(
                 _nested(state, _STATE_FROST_PROTECTION), _SETPOINT
             ),
-            "ThermostatName": None if name is None else name.decode(errors="replace"),
+            # A thermostat may have no name of its own while the cloud API
+            # gives it one (seen on an OWD5), so an empty name is not reported.
+            "ThermostatName": name.decode(errors="replace") if name else None,
             "TimeZone": _signed(info.varint(_INFO_TIME_ZONE)),
             "LoadWatts": info.varint(_INFO_LOAD),
         }

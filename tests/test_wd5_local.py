@@ -34,6 +34,7 @@ from ojmicroline_thermostat.const import (
     REGULATION_FROST_PROTECTION,
     REGULATION_MANUAL,
     REGULATION_SCHEDULE,
+    REGULATION_VACATION,
 )
 
 from . import load_fixtures
@@ -202,6 +203,8 @@ async def test_local_only_offers_the_modes_of_the_gateway(
         # A comfort hold lasts as long as asked, a boost an hour.
         (REGULATION_COMFORT, 2400, 90),
         (REGULATION_BOOST, None, 60),
+        # Frost protection keeps the setpoint the thermostat has for it.
+        (REGULATION_FROST_PROTECTION, None, None),
     ],
 )
 async def test_local_modes_go_to_the_gateway(  # noqa: PLR0913, PLR0917 # pylint: disable=too-many-arguments
@@ -246,19 +249,17 @@ async def test_other_modes_go_through_the_cloud(
     gateway: WD5Gateway,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Frost protection is set in the cloud, which needs the relay."""
+    """The vacation is set in the cloud, which needs the relay."""
     _report(gateway, SERIAL, Online=True)
     thermostat = await _thermostat(api)
 
     with pytest.raises(OJMicrolineError, match="not connected"):
-        await api.set_regulation_mode(thermostat, REGULATION_FROST_PROTECTION, None, 60)
+        await api.set_regulation_mode(thermostat, REGULATION_VACATION, None, 60)
 
     monkeypatch.setattr(gateway, "is_relayed", lambda _serial: True)
     _respond(aresponses, "/api/UserProfile/SignIn", {"SessionId": "s1", "ErrorCode": 0})
     _respond(aresponses, "/api/Group/UpdateGroup", {"ErrorCode": 0})
-    assert await api.set_regulation_mode(
-        thermostat, REGULATION_FROST_PROTECTION, None, 60
-    )
+    assert await api.set_regulation_mode(thermostat, REGULATION_VACATION, None, 60)
     set_mode = gateway.set_mode
     assert isinstance(set_mode, AsyncMock)
     set_mode.assert_not_awaited()
@@ -353,7 +354,7 @@ async def test_gateway_sets_the_mode_when_the_cloud_is_unreachable(
 
     # A mode the gateway cannot set still needs the cloud.
     with pytest.raises(OJMicrolineConnectionError):
-        await api.set_regulation_mode(thermostat, REGULATION_FROST_PROTECTION, None, 60)
+        await api.set_regulation_mode(thermostat, REGULATION_VACATION, None, 60)
 
 
 async def test_refusal_of_the_cloud_is_not_overruled(
@@ -388,7 +389,7 @@ async def test_set_on_gateway_needs_a_local_mode_on_the_gateway(
     _report(gateway, SERIAL, Online=True)
     thermostat = await _thermostat(api)
     with pytest.raises(OJMicrolineError, match="cannot set"):
-        await api.set_on_gateway(thermostat, REGULATION_FROST_PROTECTION, None, 60)
-    assert not api.sets_on_gateway(SERIAL, REGULATION_FROST_PROTECTION)
+        await api.set_on_gateway(thermostat, REGULATION_VACATION, None, 60)
+    assert not api.sets_on_gateway(SERIAL, REGULATION_VACATION)
     assert not api.sets_on_gateway(OTHER, REGULATION_MANUAL)
     assert api.sets_on_gateway(SERIAL, REGULATION_MANUAL)

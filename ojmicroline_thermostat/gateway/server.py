@@ -52,8 +52,10 @@ LOGIN_TIMEOUT = 30.0
 # A thermostat sends a heartbeat every minute. After three missed ones the
 # link is dead (power cut, Wi-Fi drop), even if the connection looks open.
 IDLE_TIMEOUT = 180.0
-# How long a thermostat gets to acknowledge a command.
-ACKNOWLEDGE_TIMEOUT = 10.0
+# How long a thermostat gets to acknowledge a command. The Wi-Fi module of a
+# thermostat was seen to take nothing in for up to about 30 seconds while it
+# saves power, so a command can take that long to arrive.
+ACKNOWLEDGE_TIMEOUT = 40.0
 # How long a late acknowledgement still counts. Thermostats were seen to
 # acknowledge up to 33 seconds late; after this a command counts as lost, so
 # its number cannot take the answer to a later message.

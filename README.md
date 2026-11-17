@@ -311,13 +311,17 @@ The gateway has two modes:
 
 A WG4 thermostat needs a profile before it can be answered locally, so start
 in relay mode. A WD5 thermostat needs none. The gateway sets the schedule and
-manual modes of a WG4 thermostat, and the schedule, comfort, manual, boost and
-eco modes of a WD5 thermostat. Other modes and the energy usage still go
-through the cloud API, which only reaches a thermostat that is relayed.
+manual modes of a WG4 thermostat, and the schedule, comfort, manual, boost,
+eco and frost protection modes of a WD5 thermostat. Frost protection through
+the gateway has not been seen on a real thermostat yet. Other modes and the
+energy usage still go through the cloud API, which only reaches a thermostat
+that is relayed.
 
-A thermostat can take longer to acknowledge a command than the 10 seconds the
-gateway waits. The call fails with `OJMicrolineTimeoutError` then, but when the
-acknowledgement still comes, the new state is reported like any other change.
+The Wi-Fi of a thermostat can take nothing in for up to about 30 seconds
+while it saves power, so a command may take that long to arrive. The gateway
+waits 40 seconds for the acknowledgement. When it takes longer, the call fails
+with `OJMicrolineTimeoutError`, but when the acknowledgement still comes, the
+new state is reported like any other change.
 
 ```python
 import asyncio

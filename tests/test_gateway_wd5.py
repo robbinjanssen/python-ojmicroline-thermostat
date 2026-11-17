@@ -499,9 +499,11 @@ def test_decode_state_survives_invalid_text() -> None:
     info = Message.parse(encode_field(7, encode_field(2, b"\xffBad")))
     assert decode_state(info) == {"ThermostatName": "�Bad"}
 
-    # An empty name is a name, and a name that is a number is none.
+    # An empty name is not reported: a thermostat may have no name of its own
+    # while the cloud API gives it one (seen on an OWD5). A name that is a
+    # number is none either.
     empty = Message.parse(encode_field(7, encode_field(2, b"")))
-    assert decode_state(empty) == {"ThermostatName": ""}
+    assert not decode_state(empty)
     assert not decode_state(Message.parse(encode_field(7, encode_field(2, 5))))
 
 
@@ -819,6 +821,15 @@ def test_changed_state_comfort_from_a_command_of_the_cloud() -> None:
         "FrostProtectionTemperature": 500,
     }
     assert _other_fields(changed, 1, 2, 3) == _other_fields(MANUAL_STATE, 1, 2, 3)
+
+
+def test_changed_state_frost_protection_keeps_its_setpoint() -> None:
+    """Frost protection only changes the mode, as a wall controller does."""
+    changed = changed_state(MANUAL_STATE, REGULATION_FROST_PROTECTION)
+
+    assert _decoded(changed)["RegulationMode"] == REGULATION_FROST_PROTECTION
+    assert _decoded(changed)["FrostProtectionTemperature"] == 500
+    assert _other_fields(changed, 1, 2) == _other_fields(MANUAL_STATE, 1, 2)
 
 
 def test_changed_state_comfort_keeps_what_is_not_given() -> None:

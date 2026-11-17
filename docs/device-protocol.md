@@ -116,7 +116,7 @@ thermostat switches mode but keeps the old setpoint.
 
 The gateway changes those fields in the encoded state itself, so every other
 byte goes back as the thermostat sent it. It sends one command at a time per
-thermostat and waits 10 seconds for the acknowledgement. Its sequence numbers
+thermostat and waits 40 seconds for the acknowledgement. Its sequence numbers
 start at 101, and skip a number that a message of OJ's gateway is still
 waiting on.
 
@@ -125,9 +125,9 @@ it sent the thermostat and what OJ's gateway sent, in that order, and gives
 an acknowledgement to the oldest message with its number. Once the thermostat
 accepts a command, the state of that command is the basis for the next one and
 is reported as the new state. That also holds for an acknowledgement that
-comes after the 10 seconds: the caller got an error by then, but the
+comes after the 40 seconds: the caller got an error by then, but the
 thermostat did change. After 60 seconds a command without an answer counts as
-lost, and so does one whose 10 seconds are over once OJ's gateway sends a
+lost, and so does one whose 40 seconds are over once OJ's gateway sends a
 message with its number. Its number then cannot take the answer to a later
 message.
 
@@ -139,6 +139,19 @@ A command is only sent to a thermostat that is connected and has uploaded its
 state. It is never kept for later.
 
 The local link cannot start a temporary hold with an end time, or a vacation.
+
+### Late acknowledgements
+
+Seen on 17 November, on an OWD5 thermostat in local mode: a command was
+acknowledged 12.3 seconds after it was sent. At the 10 seconds the gateway
+waited then, the TCP connection had one segment that the thermostat had not
+acknowledged, sent again 10 times, and the last acknowledgement of the
+thermostat was 27 seconds old, with a round trip of 105 ms. So for about
+half a minute the thermostat took in nothing at all, not even at the TCP
+level, while the network was fine. Two other commands were acknowledged after
+5.6 and 0.6 seconds. The router of that tester names the thermostat's Wi-Fi
+module HF-LPB100. A Wi-Fi module that saves power by not listening for a
+while fits all of this. The gateway therefore waits 40 seconds.
 
 ## Relaying
 
@@ -190,15 +203,11 @@ These need a real thermostat to answer.
   within a minute. In that time nothing else the gateway sent was answered
   either: an acknowledgement of a heartbeat did not arrive, and OJ's gateway
   repeated its commands. Reported: the owner's own gateway sends the same
-  command and gets its acknowledgement within 10 seconds. The delays fit the
-  moments at which the system sends a TCP segment again, which would mean
-  that the command does not reach the thermostat at first. A thermostat that
-  stops reading its connection while it handles the command fits too. The
-  event of a command that timed out therefore tells the state of the TCP
-  connection, which tells these apart, and that of an acknowledgement tells
-  its value. Seen on 14 November: the same commands, built and sent the same
-  way, were all acknowledged within 2.5 seconds, so no TCP state of a timeout
-  is known yet.
+  command and gets its acknowledgement within 10 seconds. On 14 November the
+  same commands were all acknowledged within 2.5 seconds. A WD5 thermostat
+  showed the cause on 17 November, see
+  [Late acknowledgements](#late-acknowledgements); whether a WG4 thermostat
+  does the same is not confirmed.
 - Does OJ's gateway send the configuration and support answers on every new
   connection? Seen: on each of three connections of a thermostat that was
   already set up.
@@ -256,6 +265,8 @@ Seen:
   thermostat reported its new state to OJ's gateway right after.
 - After the gateway closed the connections, because Home Assistant reloaded
   it, the thermostats connected again within 33 and 46 seconds.
+- One thermostat reported an empty name in 7.2, while the cloud API named
+  it. An empty name is therefore not reported.
 
 ### Where the thermostat connects
 
@@ -311,9 +322,12 @@ state from what the thermostat reported and what the cloud API knows of it.
 That includes the vacation: left out, a command would erase a vacation the
 thermostat has stored. A setpoint that nobody knows becomes a default.
 
-The gateway sets the schedule, comfort, manual, boost and eco modes. Reported
-as working on the OWD5 thermostat: those five and the vacation. This library
-leaves the vacation and frost protection to the cloud API.
+The gateway sets the schedule, comfort, manual, boost, eco and frost
+protection modes. Reported as working on the OWD5 thermostat: the first five
+and the vacation. Frost protection only changes 9.2 and keeps the setpoint in
+9.7. Seen: a wall controller switched an OWD5 thermostat to frost protection,
+and it reported `mode=6 frost-protection=5.00C`; through the gateway it has
+not been seen yet. This library leaves the vacation to the cloud API.
 
 Seen: the end of a comfort hold is the plain local time of the thermostat.
 Comfort for 240 minutes, set by the gateway at 22:58:01, ended at 02:58:01.

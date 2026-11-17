@@ -8,6 +8,7 @@ from .const import (
     REGULATION_BOOST,
     REGULATION_COMFORT,
     REGULATION_ECO,
+    REGULATION_FROST_PROTECTION,
     REGULATION_MANUAL,
     REGULATION_SCHEDULE,
 )
@@ -19,14 +20,16 @@ from .models import Thermostat
 from .wd5 import WD5API
 
 # The regulation modes the gateway can set by itself. The vacation is set
-# through the cloud API, and so is frost protection, which is not confirmed
-# on a thermostat.
+# through the cloud API. Frost protection keeps the setpoint the thermostat
+# has for it; a wall controller sets it the same way, but through the
+# gateway it has not been seen on a real thermostat yet.
 LOCAL_MODES = (
     REGULATION_SCHEDULE,
     REGULATION_COMFORT,
     REGULATION_MANUAL,
     REGULATION_BOOST,
     REGULATION_ECO,
+    REGULATION_FROST_PROTECTION,
 )
 # A boost lasts an hour, as it does when the cloud API starts one.
 BOOST_DURATION = 60
