@@ -326,8 +326,9 @@ The gateway sets the schedule, comfort, manual, boost, eco and frost
 protection modes. Reported as working on the OWD5 thermostat: the first five
 and the vacation. Frost protection only changes 9.2 and keeps the setpoint in
 9.7. Seen: a wall controller switched an OWD5 thermostat to frost protection,
-and it reported `mode=6 frost-protection=5.00C`; through the gateway it has
-not been seen yet. This library leaves the vacation to the cloud API.
+and it reported `mode=6 frost-protection=5.00C`. So did a command of the
+gateway, on 17 November, acknowledged within 0.4 seconds. This library
+leaves the vacation to the cloud API.
 
 Seen: the end of a comfort hold is the plain local time of the thermostat.
 Comfort for 240 minutes, set by the gateway at 22:58:01, ended at 02:58:01.
@@ -344,11 +345,12 @@ only sends it itself when the cloud does not reach the thermostat.
 
 ### Open questions
 
-- Local mode, the vacation and the other modes on a real thermostat. Only
-  relay mode, comfort and the schedule have been seen.
+- The vacation and the boost on a real thermostat. Relay mode, local mode,
+  and the schedule, comfort, manual, eco and frost protection modes have
+  been seen.
 - What 9.8 and 9.9 of the state mean; OJ's gateway sends 1 and 0. And what
-  6.5 to 6.7 of the heartbeat mean. Seen: 6.5 was 1 while a comfort hold set
-  in the app was on.
+  6.5 to 6.7 of the heartbeat mean. Seen: 6.5 was 1 while a comfort hold was
+  on, set in the app and set by the gateway, and 0 otherwise.
 - Whether the time zone a thermostat reports (7.3) includes summer time.
   Seen: 3600 in November, in Central European time. The end of a comfort
   hold or a boost is written in the local time of the thermostat, so an hour

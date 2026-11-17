@@ -298,9 +298,10 @@ The connection, the relay, recording the profile, answering the thermostat
 locally and falling back to that while OJ's gateway was unreachable worked.
 In the first test the thermostat acknowledged commands too late; in the
 second it acknowledged all of them in time, and why they differed is not
-known. The WD5 gateway has run against two OWD5 thermostats in relay mode:
-the connection, the relay and commands of the gateway worked; local mode has
-not been tried on a real thermostat.
+known. The WD5 gateway has run against OWD5 thermostats of three testers,
+with the relay and in local mode: the connection, the relay and commands of
+the gateway worked. A thermostat's Wi-Fi can be asleep for up to about half a
+minute, so a command may take that long.
 
 The gateway has two modes:
 
@@ -312,8 +313,7 @@ The gateway has two modes:
 A WG4 thermostat needs a profile before it can be answered locally, so start
 in relay mode. A WD5 thermostat needs none. The gateway sets the schedule and
 manual modes of a WG4 thermostat, and the schedule, comfort, manual, boost,
-eco and frost protection modes of a WD5 thermostat. Frost protection through
-the gateway has not been seen on a real thermostat yet. Other modes and the
+eco and frost protection modes of a WD5 thermostat. Other modes and the
 energy usage still go through the cloud API, which only reaches a thermostat
 that is relayed.
 

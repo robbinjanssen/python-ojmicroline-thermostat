@@ -89,8 +89,9 @@ work on a branch.
   lists what is known and what is not, and marks what was seen on a real
   thermostat. The WG4 gateway has run against one, twice: the first time its
   commands were acknowledged too late, the second time in time, for a reason
-  that is not known. The WD5 gateway has run against two OWD5 thermostats
-  in relay mode only. Do not present either as verified.
+  that is not known. The WD5 gateway has run against OWD5 thermostats of
+  three testers, with the relay and in local mode. Do not present either as
+  verified.
   - `DeviceGateway` knows no field of a series besides the sequence number
     and the acknowledgement. What differs per series goes into the hooks of
     its subclass, not into a check on the series.

@@ -21,8 +21,7 @@ from .wd5 import WD5API
 
 # The regulation modes the gateway can set by itself. The vacation is set
 # through the cloud API. Frost protection keeps the setpoint the thermostat
-# has for it; a wall controller sets it the same way, but through the
-# gateway it has not been seen on a real thermostat yet.
+# has for it, as a wall controller does; seen on an OWD5 on 17 November.
 LOCAL_MODES = (
     REGULATION_SCHEDULE,
     REGULATION_COMFORT,
