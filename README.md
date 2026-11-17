@@ -298,7 +298,9 @@ The connection, the relay, recording the profile, answering the thermostat
 locally and falling back to that while OJ's gateway was unreachable worked.
 In the first test the thermostat acknowledged commands too late; in the
 second it acknowledged all of them in time, and why they differed is not
-known. The WD5 gateway has only run against a simulated thermostat.
+known. The WD5 gateway has run against two OWD5 thermostats in relay mode:
+the connection, the relay and commands of the gateway worked; local mode has
+not been tried on a real thermostat.
 
 The gateway has two modes:
 
@@ -417,7 +419,13 @@ api = WD5LocalAPI(
 ```
 
 The cloud API of the WD5 series sets a mode for every thermostat of a group.
-A command of the gateway only reaches the thermostat it is sent to.
+A command of the gateway only reaches the thermostat it is sent to, but the
+cloud does not take over the mode the thermostat then reports, so the
+vendor's app would not show it. `WD5LocalAPI` therefore sets a mode through
+the cloud while the gateway relays the thermostat (`cloud_first`). The
+gateway sets the mode itself when the cloud does not reach the thermostat,
+in local mode or while OJ's gateway is unreachable, and when the cloud API
+cannot be reached.
 
 Both gateways share these members:
 
@@ -428,7 +436,7 @@ Both gateways share these members:
 | `is_relayed(serial)` | Whether a thermostat is connected to OJ's gateway as well. |
 | `on_upstream`, `upstream_status` | Whether OJ's gateway can be used. `UpstreamStatus.UNTRUSTED` means its certificate does not match the pinned fingerprint; nothing is sent to it then. |
 | `upstream_fingerprint` | The SHA-256 fingerprint of the certificate OJ's gateway showed last. |
-| `history` | The last 300 events on the connections, each with its UTC time: connections and how TLS went, every message by field number and decoded temperature, commands and their answers. The same lines are logged at debug level by `ojmicroline_thermostat.gateway.server`. A WG4 login, which holds the email address of the account, is never in it. |
+| `history` | The last 300 events on the connections, each with its time in UTC: connections and how TLS went, every message by field number and decoded temperature, commands and their answers. The same lines are logged at debug level by `ojmicroline_thermostat.gateway.server`. A WG4 login, which holds the email address of the account, is never in it. |
 
 And both APIs these:
 
@@ -439,6 +447,9 @@ And both APIs these:
 | `on_gateway(serial)` | Whether the gateway serves a thermostat: it is connected now, or, in local mode, it was before. |
 | `cloud_reaches(serial)` | Whether a change through the cloud API reaches a thermostat: it is not on the gateway, or it is relayed. |
 | `can_set(serial, mode)` | Whether `set_regulation_mode()` can set a mode right now. |
+| `sets_on_gateway(serial, mode)` | Whether `set_regulation_mode()` sends a mode to the gateway rather than through the cloud. |
+| `set_on_gateway(resource, mode, temperature, duration)` | Send one of `local_modes` to a thermostat on the gateway, for when a change through the cloud failed because the cloud API cannot be reached. |
+| `cloud_first` | Whether a mode for a relayed thermostat goes through the cloud: `True` for the WD5 series. |
 | `cloud_thermostat(serial)` | A thermostat as the cloud API described it last, without what it reported to the gateway. |
 | `local_modes` | The regulation modes the gateway sets by itself. |
 

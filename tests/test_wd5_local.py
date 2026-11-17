@@ -21,6 +21,7 @@ from ojmicroline_thermostat import (
     WD5API,
     GatewayMode,
     OJMicroline,
+    OJMicrolineConnectionError,
     OJMicrolineError,
     Thermostat,
     WD5Gateway,
@@ -305,3 +306,89 @@ async def test_cloud_thermostat_leaves_out_what_it_reported(
     assert cloud is not None
     assert cloud.regulation_mode == REGULATION_SCHEDULE
     assert api.cloud_thermostat("0") is None
+
+
+async def test_relayed_thermostat_is_set_through_the_cloud(
+    aresponses: ResponsesMockServer,
+    api: WD5LocalAPI,
+    gateway: WD5Gateway,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cloud keeps the mode of a group, so the app shows only its changes.
+
+    A mode the gateway set alone would not show in the vendor's app.
+    """
+    _report(gateway, SERIAL, Online=True)
+    monkeypatch.setattr(gateway, "is_relayed", lambda _serial: True)
+    thermostat = await _thermostat(api)
+    assert not api.sets_on_gateway(SERIAL, REGULATION_MANUAL)
+
+    _respond(aresponses, "/api/UserProfile/SignIn", {"SessionId": "s1", "ErrorCode": 0})
+    _respond(aresponses, "/api/Group/UpdateGroup", {"ErrorCode": 0})
+    assert await api.set_regulation_mode(thermostat, REGULATION_MANUAL, 2250, 60)
+
+    set_mode = gateway.set_mode
+    assert isinstance(set_mode, AsyncMock)
+    set_mode.assert_not_awaited()
+
+
+async def test_gateway_sets_the_mode_when_the_cloud_is_unreachable(
+    api: WD5LocalAPI, gateway: WD5Gateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relayed thermostat still gets a local mode without the cloud API."""
+    _report(gateway, SERIAL, Online=True)
+    monkeypatch.setattr(gateway, "is_relayed", lambda _serial: True)
+    monkeypatch.setattr(api.cloud, "login", AsyncMock())
+    monkeypatch.setattr(
+        api.cloud,
+        "set_regulation_mode",
+        AsyncMock(side_effect=OJMicrolineConnectionError("unreachable")),
+    )
+    thermostat = await _thermostat(api)
+
+    assert await api.set_regulation_mode(thermostat, REGULATION_MANUAL, 2250, 60)
+    set_mode = gateway.set_mode
+    assert isinstance(set_mode, AsyncMock)
+    set_mode.assert_awaited_once()
+
+    # A mode the gateway cannot set still needs the cloud.
+    with pytest.raises(OJMicrolineConnectionError):
+        await api.set_regulation_mode(thermostat, REGULATION_FROST_PROTECTION, None, 60)
+
+
+async def test_refusal_of_the_cloud_is_not_overruled(
+    api: WD5LocalAPI, gateway: WD5Gateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gateway only steps in when the cloud cannot be reached."""
+    _report(gateway, SERIAL, Online=True)
+    monkeypatch.setattr(gateway, "is_relayed", lambda _serial: True)
+    monkeypatch.setattr(api.cloud, "login", AsyncMock())
+    monkeypatch.setattr(
+        api.cloud,
+        "set_regulation_mode",
+        AsyncMock(side_effect=OJMicrolineError("refused")),
+    )
+    thermostat = await _thermostat(api)
+
+    with pytest.raises(OJMicrolineError, match="refused"):
+        await api.set_regulation_mode(thermostat, REGULATION_MANUAL, 2250, 60)
+    set_mode = gateway.set_mode
+    assert isinstance(set_mode, AsyncMock)
+    set_mode.assert_not_awaited()
+
+
+async def test_set_on_gateway_needs_a_local_mode_on_the_gateway(
+    api: WD5LocalAPI, gateway: WD5Gateway
+) -> None:
+    """Only a thermostat on the gateway takes a mode the gateway can set."""
+    other = await _thermostat_again(api, OTHER)
+    with pytest.raises(OJMicrolineError, match="not connected"):
+        await api.set_on_gateway(other, REGULATION_MANUAL, 2250, 60)
+
+    _report(gateway, SERIAL, Online=True)
+    thermostat = await _thermostat(api)
+    with pytest.raises(OJMicrolineError, match="cannot set"):
+        await api.set_on_gateway(thermostat, REGULATION_FROST_PROTECTION, None, 60)
+    assert not api.sets_on_gateway(SERIAL, REGULATION_FROST_PROTECTION)
+    assert not api.sets_on_gateway(OTHER, REGULATION_MANUAL)
+    assert api.sets_on_gateway(SERIAL, REGULATION_MANUAL)

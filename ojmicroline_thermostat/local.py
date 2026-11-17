@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from .exceptions import (
+    OJMicrolineConnectionError,
     OJMicrolineError,
     OJMicrolineTimeoutError,
     OJMicrolineUnauthorizedError,
@@ -59,6 +60,11 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
     supports_notifications: bool = True
     # The regulation modes the gateway can set by itself.
     local_modes: tuple[int, ...] = ()
+    # Whether a mode for a relayed thermostat goes through the cloud first.
+    # The cloud of the WD5 series keeps the mode of a group and does not take
+    # over what the thermostat reports, so a mode the gateway set alone would
+    # not show in the vendor's app.
+    cloud_first: bool = False
 
     def __init__(
         self,
@@ -165,9 +171,13 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         """Set the regulation mode of a thermostat.
 
         For a thermostat on the gateway, the modes in local_modes go straight
-        to the thermostat. Other modes go through the cloud API, which only
-        reaches the thermostat while the gateway relays it. A thermostat that
-        is not on the gateway is set through the cloud API; see can_set().
+        to the thermostat, see sets_on_gateway(). Other modes go through the
+        cloud API, which only reaches the thermostat while the gateway relays
+        it. A thermostat that is not on the gateway is set through the cloud
+        API; see can_set().
+
+        When cloud_first sends a local mode through the cloud API and that API
+        cannot be reached, the gateway sets the mode itself.
 
         Args:
         ----
@@ -187,29 +197,71 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
 
         """
         serial = resource.serial_number
-        if self.on_gateway(serial):
-            if regulation_mode in self.local_modes:
-                # The cloud API checks a temperature; the thermostat does not.
-                if temperature is not None and not (
-                    resource.min_temperature <= temperature <= resource.max_temperature
-                ):
-                    msg = "The temperature is outside the limits of the thermostat."
-                    raise OJMicrolineError(msg)
-                await self._set_on_gateway(
+        if self.sets_on_gateway(serial, regulation_mode):
+            await self.set_on_gateway(resource, regulation_mode, temperature, duration)
+            return True
+        if not self.cloud_reaches(serial):
+            msg = (
+                "This mode is set through the cloud, which the thermostat is "
+                "not connected to."
+            )
+            raise OJMicrolineError(msg)
+        try:
+            return await self._cloud(
+                lambda: self.cloud.set_regulation_mode(
                     resource, regulation_mode, temperature, duration
                 )
-                return True
-            if not self.cloud_reaches(serial):
-                msg = (
-                    "This mode is set through the cloud, which the thermostat is "
-                    "not connected to."
-                )
-                raise OJMicrolineError(msg)
-        return await self._cloud(
-            lambda: self.cloud.set_regulation_mode(
-                resource, regulation_mode, temperature, duration
             )
-        )
+        except (OJMicrolineConnectionError, OJMicrolineTimeoutError):
+            if not (self.on_gateway(serial) and regulation_mode in self.local_modes):
+                raise
+            _LOGGER.debug(
+                "The cloud API cannot be reached; the gateway sets thermostat %s",
+                serial,
+            )
+            await self.set_on_gateway(resource, regulation_mode, temperature, duration)
+            return True
+
+    async def set_on_gateway(
+        self,
+        resource: Thermostat,
+        regulation_mode: int,
+        temperature: int | None,
+        duration: int,
+    ) -> None:
+        """Send a mode to a thermostat on the gateway, not through the cloud.
+
+        Use this when a change through the cloud failed because the cloud API
+        cannot be reached. The vendor's app does not see a mode set this way
+        on a thermostat of the WD5 series.
+
+        Args:
+        ----
+            resource: The Thermostat model.
+            regulation_mode: One of local_modes.
+            temperature: The temperature to set or None.
+            duration: The duration in minutes (comfort mode only).
+
+        Raises:
+        ------
+            OJMicrolineError: The thermostat is not on the gateway, the mode is
+                not one of local_modes, the temperature is outside the limits
+                of the thermostat, or the thermostat did not take the mode over.
+
+        """
+        if not self.on_gateway(resource.serial_number):
+            msg = "The thermostat is not connected to the gateway."
+            raise OJMicrolineError(msg)
+        if regulation_mode not in self.local_modes:
+            msg = "The gateway cannot set this mode."
+            raise OJMicrolineError(msg)
+        # The cloud API checks a temperature; the thermostat does not.
+        if temperature is not None and not (
+            resource.min_temperature <= temperature <= resource.max_temperature
+        ):
+            msg = "The temperature is outside the limits of the thermostat."
+            raise OJMicrolineError(msg)
+        await self._set_on_gateway(resource, regulation_mode, temperature, duration)
 
     async def get_notifications(self) -> list[Thermostat]:
         """Wait until a thermostat on the gateway reports something.
@@ -278,6 +330,17 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         if self.on_gateway(serial) and regulation_mode in self.local_modes:
             return True
         return self.cloud_reaches(serial)
+
+    def sets_on_gateway(self, serial: str, regulation_mode: int) -> bool:
+        """Tell whether set_regulation_mode() sends a mode to the gateway.
+
+        That is a mode of local_modes for a thermostat on the gateway, unless
+        cloud_first sends it through the cloud: for a thermostat the gateway
+        relays, which the cloud reaches, so the vendor's app shows the mode.
+        """
+        if not self.on_gateway(serial) or regulation_mode not in self.local_modes:
+            return False
+        return not (self.cloud_first and self._gateway.is_relayed(serial))
 
     # --- What a series does differently ---------------------------------------
 

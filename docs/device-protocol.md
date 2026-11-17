@@ -233,8 +233,29 @@ with other fields. What is known comes from
 (MIT), where it was worked out on an OWD5 thermostat with firmware 1013W220.
 The module [`gateway/wd5.py`](../ojmicroline_thermostat/gateway/wd5.py) lists
 every field, and [`tests/test_gateway_wd5.py`](../tests/test_gateway_wd5.py)
-holds the captured frames. This library has not run against a real WD5
-thermostat yet.
+holds the captured frames.
+
+This library ran against two OWD5 thermostats with firmware 1013W213, of an
+account of the SWATT app, on 17 November 2026 in relay mode. What that showed
+is marked as seen. The times below are local time (UTC+1); the gateway's
+history writes UTC.
+
+Seen:
+
+- The thermostat negotiates TLS 1.2 with AES256-SHA256, as the WG4 series
+  does. Both thermostats connected within 10 seconds of the gateway starting.
+- OJ's gateway answers the login with 3 = 1, 4 = 1 and 12, and then asks for
+  the full upload with sequence 0 and fields 4 and 10. The thermostat answers
+  with device info, schedule and state (fields 7, 8 and 9).
+- The thermostat numbers its messages on from one connection to the next,
+  and from 1 again after it was switched off and on. OJ's gateway numbers
+  its own commands from 1 on every connection.
+- A heartbeat (field 6) comes about once a minute. OJ's gateway acknowledges
+  every message with 3 = 1 and the server time in field 12.
+- Commands of the gateway were acknowledged within 0.5 seconds, and the
+  thermostat reported its new state to OJ's gateway right after.
+- After the gateway closed the connections, because Home Assistant reloaded
+  it, the thermostats connected again within 33 and 46 seconds.
 
 ### Where the thermostat connects
 
@@ -294,17 +315,31 @@ The gateway sets the schedule, comfort, manual, boost and eco modes. Reported
 as working on the OWD5 thermostat: those five and the vacation. This library
 leaves the vacation and frost protection to the cloud API.
 
+Seen: the end of a comfort hold is the plain local time of the thermostat.
+Comfort for 240 minutes, set by the gateway at 22:58:01, ended at 02:58:01.
+Comfort for an hour, set in the app at 23:03, came from OJ's gateway with
+the end 00:03:00. The thermostat reported both ends as it was sent them.
+
+Seen: the cloud does not take over a mode that the thermostat reports after a
+command of the gateway. The gateway set a thermostat from comfort back to the
+schedule, and the thermostat said so to OJ's gateway, which acknowledged it.
+The app kept showing comfort, also after it was restarted. The cloud keeps
+the mode of a group and only changes it itself. That is why `WD5LocalAPI`
+sets a mode through the cloud while the gateway relays the thermostat, and
+only sends it itself when the cloud does not reach the thermostat.
+
 ### Open questions
 
-- Everything above, with this library on a real thermostat.
-- How fast a thermostat acknowledges a command, given what the WG4 series
-  showed.
+- Local mode, the vacation and the other modes on a real thermostat. Only
+  relay mode, comfort and the schedule have been seen.
 - What 9.8 and 9.9 of the state mean; OJ's gateway sends 1 and 0. And what
-  6.5 to 6.7 of the heartbeat mean.
-- Whether the time zone a thermostat reports (7.3) includes summer time. The
-  end of a comfort hold or a boost is written in the local time of the
-  thermostat, so an hour of difference would show there. A time zone west of
-  UTC has not been seen either; it is read as a negative number.
+  6.5 to 6.7 of the heartbeat mean. Seen: 6.5 was 1 while a comfort hold set
+  in the app was on.
+- Whether the time zone a thermostat reports (7.3) includes summer time.
+  Seen: 3600 in November, in Central European time. The end of a comfort
+  hold or a boost is written in the local time of the thermostat, so an hour
+  of difference would show there in summer. A time zone west of UTC has not
+  been seen either; it is read as a negative number.
 - Which fields of a state OJ's gateway always sends. Its logged commands
   differ: one for the manual mode had no vacation and no boost.
 - Which hostnames the thermostats of other brands connect to.

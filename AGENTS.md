@@ -89,8 +89,8 @@ work on a branch.
   lists what is known and what is not, and marks what was seen on a real
   thermostat. The WG4 gateway has run against one, twice: the first time its
   commands were acknowledged too late, the second time in time, for a reason
-  that is not known. The WD5 gateway has not. Do not present either as
-  verified.
+  that is not known. The WD5 gateway has run against two OWD5 thermostats
+  in relay mode only. Do not present either as verified.
   - `DeviceGateway` knows no field of a series besides the sequence number
     and the acknowledgement. What differs per series goes into the hooks of
     its subclass, not into a check on the series.
@@ -116,6 +116,13 @@ work on a branch.
   - A WD5 command is a complete state that the thermostat takes over as a
     whole. Build it from the last command or from everything that is known,
     or it erases what the thermostat has stored, such as a vacation.
+  - The WD5 cloud keeps the mode of a group and ignores the mode a
+    thermostat reports, so `WD5LocalAPI` (`cloud_first`) sets a relayed
+    thermostat through the cloud; `sets_on_gateway()` holds that rule. Only
+    a connection error or timeout of the cloud API falls back to the
+    gateway, never a refusal.
+  - The history is written in UTC. A command that timed out or was refused
+    is also logged as a warning, so it shows without debug logging.
 
 ## Tests
 

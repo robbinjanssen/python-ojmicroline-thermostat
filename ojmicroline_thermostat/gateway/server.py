@@ -539,6 +539,9 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
                 sequence,
                 ACKNOWLEDGE_TIMEOUT,
                 f" ({network})" if network else "",
+                # Also without debug logging: what a report of a thermostat
+                # that stopped responding needs first.
+                level=logging.WARNING,
             )
             msg = "The thermostat did not acknowledge the command."
             raise OJMicrolineTimeoutError(msg) from error
@@ -618,6 +621,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
                 sequence,
                 seconds,
                 answer,
+                level=logging.WARNING,
             )
         if not sent.waiting.done():
             sent.waiting.set_result(answer == _ACCEPTED)
@@ -996,7 +1000,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         """Log what happened on a connection, and keep it in the history."""
         _LOGGER.log(level, message, *arguments)
         moment = datetime.now(tz=UTC)
-        self._history.append(f"{moment:%Y-%m-%d %H:%M:%S} {message % arguments}")
+        self._history.append(f"{moment:%Y-%m-%d %H:%M:%S} UTC {message % arguments}")
 
     async def _secure(self, writer: asyncio.StreamWriter, address: str) -> None:
         """Start TLS on a new connection, and tell how that went.

@@ -45,13 +45,20 @@ class WD5LocalAPI(LocalAPI[WD5API, WD5Gateway]):
     on the gateway keep working when the cloud cannot be reached. Pass the
     stored snapshot in, and store the one on_snapshot is called with.
 
-    The modes in LOCAL_MODES go straight to a thermostat on the gateway, and
-    to that thermostat only: the cloud API sets a mode for every thermostat in
-    a group. Other modes go through the cloud API, which only reaches the
-    thermostat while the gateway relays it.
+    A mode goes through the cloud API while the gateway relays the
+    thermostat, because the cloud keeps the mode of a group and does not take
+    over what the thermostat reports: a mode the gateway set alone would not
+    show in the vendor's app. That sets the mode for every thermostat in the
+    group, as the app does.
+
+    The modes in LOCAL_MODES go straight to a thermostat that the cloud does
+    not reach, in local mode or while OJ's gateway is unreachable, and to that
+    thermostat only. They do as well when the cloud API cannot be reached.
+    Other modes go through the cloud API only.
     """
 
     local_modes = LOCAL_MODES
+    cloud_first = True
 
     def _parse(self, data: dict[str, Any]) -> Thermostat:
         return Thermostat.from_wd5_json(data)
