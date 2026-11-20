@@ -15,7 +15,7 @@ from .const import (
 from .exceptions import OJMicrolineError
 from .gateway import WD5Gateway
 from .gateway.wd5 import local_in
-from .local import LocalAPI
+from .local import VOLATILE_FIELDS, LocalAPI
 from .models import Thermostat
 from .wd5 import WD5API
 
@@ -61,6 +61,7 @@ class WD5LocalAPI(LocalAPI[WD5API, WD5Gateway]):
 
     local_modes = LOCAL_MODES
     cloud_first = True
+    volatile_fields = VOLATILE_FIELDS | {"FloorTemperature", "RoomTemperature"}
 
     def _parse(self, data: dict[str, Any]) -> Thermostat:
         return Thermostat.from_wd5_json(data)

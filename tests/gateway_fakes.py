@@ -207,6 +207,9 @@ class FakeCloud:
         self.not_understood: list[bytes] = []
         self.connections = 0
         self.hung_up = 0
+        # Take a connection and never answer, or hang up at the login.
+        self.silent = False
+        self.hangs_up_at_login = False
         self._context = context
         self._server: asyncio.Server | None = None
         self._writers: list[asyncio.StreamWriter] = []
@@ -257,6 +260,10 @@ class FakeCloud:
                     self.not_understood.append(body)
                     continue
                 self.received.append(message)
+                if self.hangs_up_at_login:
+                    break
+                if self.silent:
+                    continue
                 sequence = message.varint(1) or 0
                 kind = message.varint(2)
                 if 6 in message:

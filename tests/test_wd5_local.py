@@ -7,6 +7,7 @@ series share is tested in test_wg4_local.py.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import ssl
 from datetime import UTC, datetime
@@ -23,11 +24,13 @@ from ojmicroline_thermostat import (
     OJMicroline,
     OJMicrolineConnectionError,
     OJMicrolineError,
+    OJMicrolineHTTPError,
     Thermostat,
     WD5Gateway,
     WD5LocalAPI,
     wd5_local,
 )
+from ojmicroline_thermostat import local as local_api
 from ojmicroline_thermostat.const import (
     REGULATION_BOOST,
     REGULATION_COMFORT,
@@ -393,3 +396,136 @@ async def test_set_on_gateway_needs_a_local_mode_on_the_gateway(
     assert not api.sets_on_gateway(SERIAL, REGULATION_VACATION)
     assert not api.sets_on_gateway(OTHER, REGULATION_MANUAL)
     assert api.sets_on_gateway(SERIAL, REGULATION_MANUAL)
+
+
+@pytest.mark.parametrize(
+    ("status", "falls_back"),
+    # A request the cloud turns down is not overruled; a cloud that is out of
+    # order or too busy is as good as one that cannot be reached.
+    [(400, False), (403, False), (408, True), (429, True), (500, True), (503, True)],
+)
+async def test_gateway_only_steps_in_for_a_cloud_that_is_out_of_order(  # noqa: PLR0913, PLR0917 # pylint: disable=too-many-arguments
+    aresponses: ResponsesMockServer,
+    api: WD5LocalAPI,
+    gateway: WD5Gateway,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    falls_back: bool,  # noqa: FBT001 - a parameter of the test
+) -> None:
+    """An HTTP error tells a refusal from a cloud that does not work."""
+    _report(gateway, SERIAL, Online=True)
+    monkeypatch.setattr(gateway, "is_relayed", lambda _serial: True)
+    thermostat = await _thermostat(api)
+    _respond(aresponses, "/api/UserProfile/SignIn", {"SessionId": "s1", "ErrorCode": 0})
+    aresponses.add(HOST, "/api/Group/UpdateGroup", "POST", Response(status=status))
+    set_mode = gateway.set_mode
+    assert isinstance(set_mode, AsyncMock)
+
+    if falls_back:
+        assert await api.set_regulation_mode(thermostat, REGULATION_MANUAL, 2250, 60)
+        set_mode.assert_awaited_once()
+    else:
+        with pytest.raises(OJMicrolineHTTPError) as raised:
+            await api.set_regulation_mode(thermostat, REGULATION_MANUAL, 2250, 60)
+        assert raised.value.status == status
+        set_mode.assert_not_awaited()
+
+
+async def test_slow_cloud_does_not_hold_a_mode_up(
+    api: WD5LocalAPI, gateway: WD5Gateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gateway takes over when the cloud takes too long."""
+    monkeypatch.setattr(local_api, "CLOUD_TIMEOUT", 0.05)
+    _report(gateway, SERIAL, Online=True)
+    monkeypatch.setattr(gateway, "is_relayed", lambda _serial: True)
+    thermostat = await _thermostat(api)
+
+    async def slow() -> None:
+        await asyncio.sleep(5)
+
+    assert await api.set_regulation_mode(
+        thermostat, REGULATION_MANUAL, 2250, 60, through_cloud=slow
+    )
+    set_mode = gateway.set_mode
+    assert isinstance(set_mode, AsyncMock)
+    set_mode.assert_awaited_once()
+
+
+async def test_caller_sets_the_mode_in_the_cloud_its_own_way(
+    api: WD5LocalAPI, gateway: WD5Gateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller that changes a whole group leaves the choice of route here."""
+    through_cloud = AsyncMock()
+    set_mode = gateway.set_mode
+    assert isinstance(set_mode, AsyncMock)
+
+    # A thermostat that is not on the gateway, and one that is relayed.
+    elsewhere = await _thermostat_again(api, OTHER)
+    assert await api.set_regulation_mode(
+        elsewhere, REGULATION_MANUAL, 2250, 60, through_cloud=through_cloud
+    )
+    _report(gateway, SERIAL, Online=True)
+    monkeypatch.setattr(gateway, "is_relayed", lambda _serial: True)
+    thermostat = await _thermostat(api)
+    assert await api.set_regulation_mode(
+        thermostat, REGULATION_MANUAL, 2250, 60, through_cloud=through_cloud
+    )
+    assert through_cloud.await_count == 2
+    set_mode.assert_not_awaited()
+
+    # Without the relay the gateway sets the mode, and the caller's way is
+    # not used.
+    monkeypatch.setattr(gateway, "is_relayed", lambda _serial: False)
+    assert await api.set_regulation_mode(
+        thermostat, REGULATION_MANUAL, 2250, 60, through_cloud=through_cloud
+    )
+    assert through_cloud.await_count == 2
+    set_mode.assert_awaited_once()
+
+
+async def test_known_thermostat_does_not_reach_the_cloud_after_a_restart(
+    gateway: WD5Gateway, session: aiohttp.ClientSession
+) -> None:
+    """In local mode a thermostat that connected before is the gateway's.
+
+    Nothing of a WD5 thermostat is stored but its serial number, so that is
+    what tells after a restart, before the thermostat connects again.
+    """
+    gateway.mode = GatewayMode.LOCAL
+    cloud = WD5API(
+        host=HOST,
+        api_key="ap1-k3y-v3ry-s3cret",
+        customer_id=99,
+        username="py",
+        password="test",
+    )
+    api = WD5LocalAPI(cloud, gateway, snapshot=_snapshot(), known=[SERIAL])
+    OJMicroline(api=api, session=session)
+
+    assert api.known == {SERIAL}
+    assert api.on_gateway(SERIAL)
+    assert not api.cloud_reaches(SERIAL)
+    assert api.cloud_reaches(OTHER)
+
+    # A thermostat that connects is known from then on.
+    _report(gateway, OTHER, Online=True)
+    assert api.known == {SERIAL, OTHER}
+
+
+async def test_refresh_fetches_the_cloud_or_tells_why_not(
+    aresponses: ResponsesMockServer, api: WD5LocalAPI
+) -> None:
+    """A change of a whole group starts from what the cloud knows now."""
+    changed = json.loads(load_fixtures("wd5_group.json"))
+    changed["GroupContents"][0]["Thermostats"][0]["ManualModeSetpoint"] = 1234
+    _respond(aresponses, "/api/UserProfile/SignIn", {"SessionId": "s1", "ErrorCode": 0})
+    _respond(aresponses, "/api/Group/GroupContents", changed)
+
+    await api.refresh()
+    known = api.cloud_thermostat(SERIAL)
+    assert known is not None
+    assert known.manual_temperature == 1234
+
+    aresponses.add(HOST, "/api/Group/GroupContents", "GET", Response(status=500))
+    with pytest.raises(OJMicrolineHTTPError):
+        await api.refresh()

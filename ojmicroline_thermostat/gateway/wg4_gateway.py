@@ -8,7 +8,8 @@ while it relays the thermostat, and repeats them afterwards.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from ojmicroline_thermostat.exceptions import OJMicrolineConnectionError
 
@@ -19,6 +20,7 @@ from .server import (
     DeviceGateway,
     GatewayEndpoint,
     GatewayMode,
+    _Command,
     _Link,
 )
 from .wg4 import (
@@ -43,6 +45,7 @@ from .wg4 import (
 )
 
 if TYPE_CHECKING:
+    import asyncio
     import ssl
     from collections.abc import Mapping
 
@@ -50,7 +53,44 @@ if TYPE_CHECKING:
 ProfileListener = Callable[[str, DeviceProfile], None]
 
 
-class WG4Gateway(DeviceGateway):
+@dataclass(eq=False)
+class _WG4Link(_Link):
+    """The connection of a WG4 thermostat."""
+
+    # The state and schedule the thermostat holds, as it sent them last.
+    state: bytes | None = None
+    schedule: bytes | None = None
+    # The answers OJ's gateway gave on this connection, as frames.
+    configuration: bytes | None = None
+    support: bytes | None = None
+
+
+def _decoded(message: Message) -> dict[str, Any]:
+    """Read what a message tells about a thermostat, in cloud API fields.
+
+    Raises
+    ------
+        ValueError: The message is malformed.
+
+    """
+    if FIELD_STATE in message or FIELD_DEVICE_INFO in message:
+        return decode_state(message)
+    return decode_telemetry(message)
+
+
+def _held(
+    message: Message, state: bytes | None, schedule: bytes | None
+) -> tuple[bytes | None, bytes | None]:
+    """Return the state and schedule a thermostat holds after a message."""
+    new_state = message.data(FIELD_STATE)
+    new_schedule = message.data(FIELD_SCHEDULE)
+    return (
+        state if new_state is None else new_state,
+        schedule if new_schedule is None else new_schedule,
+    )
+
+
+class WG4Gateway(DeviceGateway[_WG4Link]):
     """Accepts the connections of WG4-series thermostats on the local network.
 
     Only thermostats in allowed_serials are served; any other connection is
@@ -106,7 +146,8 @@ class WG4Gateway(DeviceGateway):
     ) -> None:
         """Put a thermostat in a regulation mode and wait until it confirms.
 
-        The command is built from the state the thermostat reported last, so
+        The command is built from the state the thermostat holds: what it
+        reported or accepted last, with what OJ's gateway sent it since. So
         it only works for a connected thermostat that has uploaded its state.
         A command is never kept for later: a setpoint that is applied hours
         late does more harm than an error.
@@ -131,16 +172,16 @@ class WG4Gateway(DeviceGateway):
             OJMicrolineError: The thermostat refused the command.
 
         """
-        link = self._link(serial)
-        async with link.lock:
-            if link.closed:
-                msg = "The thermostat disconnected from the gateway."
-                raise OJMicrolineConnectionError(msg)
-            if link.state is None:
+
+        def prepare(link: _WG4Link) -> _Command:
+            held, schedule = link.state, link.schedule
+            for underway in self._underway(link):
+                # A change of the vendor's app reaches the thermostat first.
+                held, schedule = _held(underway, held, schedule)
+            if held is None:
                 msg = "The thermostat has not reported its state yet."
                 raise OJMicrolineConnectionError(msg)
-            state = changed_state(link.state, mode, temperature)
-            schedule = link.schedule
+            state = changed_state(held, mode, temperature)
 
             def accept() -> None:
                 # The thermostat took the state over, so the next command
@@ -149,11 +190,14 @@ class WG4Gateway(DeviceGateway):
                 reported = Message.parse(encode_field(FIELD_STATE, state))
                 self._notify(self.on_state, serial, decode_state(reported))
 
-            await self._send_command(
-                link, lambda sequence: command(sequence, state, schedule), accept
-            )
+            return (lambda sequence: command(sequence, state, schedule)), accept
+
+        await self._command(serial, prepare)
 
     # --- What a WG4 thermostat says and expects -------------------------------
+
+    def _new_link(self, serial: str, writer: asyncio.StreamWriter) -> _WG4Link:
+        return _WG4Link(serial, writer)
 
     def _login_serial(self, message: Message) -> str | None:
         return login_serial(message)
@@ -175,7 +219,7 @@ class WG4Gateway(DeviceGateway):
         sequence = login.varint(FIELD_SEQUENCE) or 0
         return encode_frame(login_acknowledgement(sequence))
 
-    def _reply(self, link: _Link, message: Message) -> bytes | None:
+    def _reply(self, link: _WG4Link, message: Message) -> bytes | None:
         sequence = message.varint(FIELD_SEQUENCE) or 0
         kind = message.varint(FIELD_KIND)
         # Only a thermostat with a profile is answered, see _can_answer().
@@ -189,28 +233,26 @@ class WG4Gateway(DeviceGateway):
             return encode_frame(acknowledgement(sequence))
         return None
 
-    def _observe(self, link: _Link, message: Message) -> None:
+    def _observe(self, link: _WG4Link, message: Message) -> None:
         # Decoding comes first: it refuses a malformed state, which must not
         # become the state that the next command starts from.
-        if FIELD_STATE in message or FIELD_DEVICE_INFO in message:
-            fields = decode_state(message)
-        else:
-            fields = decode_telemetry(message)
-        schedule = message.data(FIELD_SCHEDULE)
-        if schedule is not None:
-            link.schedule = schedule
-        state = message.data(FIELD_STATE)
-        if state is not None:
-            link.state = state
+        fields = _decoded(message)
+        link.state, link.schedule = _held(message, link.state, link.schedule)
         if fields:
             self._notify(self.on_state, link.serial, fields)
 
-    def _observe_upstream(self, link: _Link, frame: bytes, message: Message) -> None:
+    def _observe_upstream(self, link: _WG4Link, frame: bytes, message: Message) -> None:
         self._record(link, frame, message)
+        # Decoding now tells a message that is not understood right away, and
+        # keeps it from being learnt from; what it changes counts once the
+        # thermostat accepted it.
+        _decoded(message)
+
+    def _delivered(self, link: _WG4Link, message: Message) -> None:
         # A change made in the vendor's app arrives as a command.
         self._observe(link, message)
 
-    def _record(self, link: _Link, frame: bytes, message: Message) -> None:
+    def _record(self, link: _WG4Link, frame: bytes, message: Message) -> None:
         """Keep the answers of OJ's gateway that make up a profile."""
         number = response_field(message)
         if number is None:

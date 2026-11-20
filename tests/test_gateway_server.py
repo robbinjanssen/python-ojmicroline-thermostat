@@ -415,6 +415,23 @@ async def test_second_login_is_refused(
     await until(lambda: not gateway.connected)
 
 
+async def test_field_of_a_login_that_is_none_is_not_a_second_login(
+    gateway: WG4Gateway, connect: Callable[[], Any]
+) -> None:
+    """A message another firmware fills differently does not end the connection."""
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    await thermostat.send(
+        encode_field(1, 50) + encode_field(5, 1) + encode_field(6, b"\x00")
+    )
+    await thermostat.send(TELEMETRY)
+
+    # Both are answered like any other message.
+    assert (await thermostat.receive()).varint(1) == 50
+    assert (await thermostat.receive()).varint(1) == Message.parse(TELEMETRY).varint(1)
+    assert gateway.connected == {SERIAL}
+
+
 @pytest.mark.parametrize(
     "data",
     [

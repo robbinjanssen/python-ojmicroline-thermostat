@@ -73,8 +73,9 @@ class WD5API(SessionOJMicrolineAPI):
 
     def thermostat_items(self, data: Any) -> list[dict[str, Any]]:  # noqa: D102
         if data["ErrorCode"] == 1:
+            # The answer stays out of the error, which ends up in logs.
             msg = "Unable to get thermostats via API."
-            raise OJMicrolineResultsError(msg, {"data": data})
+            raise OJMicrolineResultsError(msg)
         return [
             item
             for group in data["GroupContents"]
@@ -87,7 +88,7 @@ class WD5API(SessionOJMicrolineAPI):
     def parse_energy_usage_response(self, data: Any) -> list[float]:  # noqa: D102
         if data["ErrorCode"] == 1:
             msg = "Unable to get energy usage via API."
-            raise OJMicrolineResultsError(msg, {"data": data})
+            raise OJMicrolineResultsError(msg)
 
         return [d["EnergyKWattHour"] for d in data["EnergyUsage"][0]["Usage"]]
 

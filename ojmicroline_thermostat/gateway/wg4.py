@@ -384,8 +384,13 @@ def _describe_state(message: Message) -> list[str]:
         hold = state.message(_TEMPORARY_HOLD)
         until = None if hold is None else hold.varint(_HOLD_END_TIME)
         if until is not None:
-            end = EPOCH + timedelta(seconds=until)
-            parts.append(f"until={end:%Y-%m-%d %H:%M:%SZ}")
+            try:
+                end = EPOCH + timedelta(seconds=until)
+            except OverflowError:
+                # An end that no calendar holds, such as "never".
+                parts.append(f"until={until}")
+            else:
+                parts.append(f"until={end:%Y-%m-%d %H:%M:%SZ}")
     if _PERMANENT_HOLD in setpoints:
         parts.append(f"permanent={_celsius(setpoints[_PERMANENT_HOLD])}")
     shown = {_STATE_TIME, _STATE_MODE, _TEMPORARY_HOLD, _PERMANENT_HOLD}

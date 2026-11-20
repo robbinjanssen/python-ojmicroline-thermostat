@@ -24,6 +24,7 @@ from ojmicroline_thermostat import (
     OJMicrolineAuthError,
     OJMicrolineConnectionError,
     OJMicrolineError,
+    OJMicrolineResultsError,
     OJMicrolineTimeoutError,
     Thermostat,
     WG4Gateway,
@@ -658,3 +659,107 @@ async def test_thermostat_is_controlled_without_the_cloud(
         await thermostat.close()
         await gateway.stop()
         await client.close()
+
+
+async def test_snapshot_is_stored_when_something_lasting_changes(
+    aresponses: ResponsesMockServer,
+    session: aiohttp.ClientSession,
+    cloud: WG4API,
+    gateway: WG4Gateway,
+) -> None:
+    """A measured temperature alone is not worth writing the snapshot again."""
+    stored: list[SnapshotData] = []
+    client, _ = _client(
+        WG4LocalAPI(cloud, gateway, snapshot=_snapshot(), on_snapshot=stored.append),
+        session,
+    )
+    answer = json.loads(load_fixtures("wg4_group.json"))
+    measured = next(
+        item
+        for group in answer["Groups"]
+        for item in group["Thermostats"]
+        if item.get("SerialNumber") == OTHER
+    )
+    measured.update(Temperature=1234, Heating=not measured["Heating"], Online=False)
+    _respond(aresponses, "/api/authenticate/user", {"SessionId": "s1", "ErrorCode": 0})
+    _respond(aresponses, "/api/thermostats", answer)
+
+    thermostats = _by_serial(await client.get_thermostats())
+    # The new values are used, and nothing is stored.
+    assert thermostats[measured["SerialNumber"]].temperature == 1234
+    assert not stored
+
+    measured["ManualTemperature"] = 2345
+    _respond(aresponses, "/api/thermostats", answer)
+    await client.get_thermostats()
+    assert len(stored) == 1
+    assert stored[0][measured["SerialNumber"]]["ManualTemperature"] == 2345
+
+
+async def test_answer_in_another_form_keeps_the_snapshot(
+    aresponses: ResponsesMockServer,
+    session: aiohttp.ClientSession,
+    cloud: WG4API,
+    gateway: WG4Gateway,
+) -> None:
+    """A cloud that answers something else must not stop the thermostats."""
+    stored: list[SnapshotData] = []
+    client, api = _client(
+        WG4LocalAPI(cloud, gateway, snapshot=_snapshot(), on_snapshot=stored.append),
+        session,
+    )
+    _respond(aresponses, "/api/authenticate/user", {"SessionId": "s1", "ErrorCode": 0})
+    _respond(aresponses, "/api/thermostats", {"ErrorCode": 0, "Message": "Try later"})
+
+    assert len(await client.get_thermostats()) == 2
+    assert isinstance(api.cloud_error, OJMicrolineResultsError)
+
+    # Not the thermostats at all, one without a serial number, and one that
+    # has a serial number and nothing else: that one must not replace the
+    # snapshot either, or it would be stored and never read again.
+    answers: list[Any] = [
+        [],
+        {"Groups": [{"Thermostats": [{"Room": "No serial"}]}]},
+        {"Groups": [{"Thermostats": [{"SerialNumber": SERIAL}]}]},
+    ]
+    for odd in answers:
+        _respond(aresponses, "/api/thermostats", odd)
+        assert len(await client.get_thermostats()) == 2
+        assert isinstance(api.cloud_error, OJMicrolineResultsError)
+        # The answer stays out of the error, which ends up in logs.
+        assert len(api.cloud_error.args) == 1
+    assert not stored
+
+
+async def test_energy_price_is_remembered(
+    aresponses: ResponsesMockServer,
+    session: aiohttp.ClientSession,
+    cloud: WG4API,
+    gateway: WG4Gateway,
+) -> None:
+    """A new price outlives the next report of the thermostat.
+
+    The thermostat does not report the price, so without remembering it the
+    old one of the snapshot would come back.
+    """
+    stored: list[SnapshotData] = []
+    _, api = _client(
+        WG4LocalAPI(cloud, gateway, snapshot=_snapshot(), on_snapshot=stored.append),
+        session,
+    )
+    thermostat = _by_serial(await api.get_notifications())[SERIAL]
+    _respond(aresponses, "/api/authenticate/user", {"SessionId": "s1", "ErrorCode": 0})
+    _respond(aresponses, "/api/thermostat", {"Success": True})
+    _respond(aresponses, "/api/thermostat", {"Success": True})
+
+    assert await api.set_energy_price(thermostat, 0.314)
+
+    _report(gateway, SERIAL, Online=True, Temperature=2100)
+    assert _by_serial(await api.get_notifications())[SERIAL].energy_price == 0.31
+    # The price is stored as well, or a restart would bring the old one back.
+    assert [snapshot[SERIAL]["KwhCharge"] for snapshot in stored] == [0.31]
+
+    # The same price again is nothing new to store.
+    assert await api.set_energy_price(thermostat, 0.31)
+    assert len(stored) == 1
+    aresponses.assert_plan_strictly_followed()

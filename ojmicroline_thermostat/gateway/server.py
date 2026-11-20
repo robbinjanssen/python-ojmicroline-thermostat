@@ -32,7 +32,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from ojmicroline_thermostat.exceptions import (
     OJMicrolineConnectionError,
@@ -60,11 +60,12 @@ ACKNOWLEDGE_TIMEOUT = 40.0
 # acknowledge up to 33 seconds late; after this a command counts as lost, so
 # its number cannot take the answer to a later message.
 LATE_ACKNOWLEDGE_TIMEOUT = 60.0
-# How long OJ's gateway gets to accept a connection. A thermostat gives up on
-# its login within a few seconds, so this has to stay well below that; a
-# connection that works takes a fraction of a second.
+# How long OJ's gateway gets to accept a connection, and then again to answer
+# a login. A thermostat gives up on its login within a few seconds, so this
+# has to stay well below that; a gateway that works takes a fraction of a
+# second for each.
 UPSTREAM_TIMEOUT = 3.0
-# How long OJ's gateway is left alone after it could not be reached, and how
+# How long OJ's gateway is left alone after it could not be used, and how
 # often it is tried again for a thermostat that is answered locally meanwhile.
 UPSTREAM_RETRY_INTERVAL = 300.0
 
@@ -113,6 +114,8 @@ class UpstreamStatus(StrEnum):
 StateListener = Callable[[str, dict[str, Any]], None]
 # Called when an attempt to reach OJ's gateway ends differently than the last.
 UpstreamListener = Callable[[UpstreamStatus], None]
+# Called with the serial number of a thermostat that logged in.
+ConnectListener = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -287,14 +290,16 @@ class _Sent:
     """A message a thermostat was sent and still has to answer.
 
     For a command of the gateway it holds what to do once the thermostat
-    accepts it, who waits for the answer, and when it was sent. A message of
-    OJ's gateway has none of these: its answer is passed on.
+    accepts it and who waits for the answer. A message of OJ's gateway has
+    neither: its answer is passed on. If the gateway understands such a
+    message it is kept, to learn from once the thermostat accepted it.
     """
 
     sequence: int
     accept: Callable[[], None] | None = None
     waiting: asyncio.Future[bool] | None = None
     sent_at: float = 0.0
+    message: Message | None = None
 
 
 def _unanswered() -> deque[_Sent]:
@@ -302,8 +307,11 @@ def _unanswered() -> deque[_Sent]:
 
 
 @dataclass(eq=False)
-class _Link:  # pylint: disable=too-many-instance-attributes
-    """The connection of one thermostat."""
+class _Link:
+    """The connection of one thermostat.
+
+    A series keeps what it knows of the thermostat in a subclass.
+    """
 
     serial: str
     writer: asyncio.StreamWriter
@@ -315,27 +323,23 @@ class _Link:  # pylint: disable=too-many-instance-attributes
     # OJ's gateway and this one used the same number.
     unanswered: deque[_Sent] = field(default_factory=_unanswered)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    # The state and schedule the thermostat holds, as it sent them last.
-    state: bytes | None = None
-    schedule: bytes | None = None
-    # WG4: the answers OJ's gateway gave on this connection, as frames.
-    configuration: bytes | None = None
-    support: bytes | None = None
-    # WD5: whether the thermostat uploaded what it holds, the state of the
-    # last command it was sent, and everything it reported so far.
-    ready: bool = False
-    template: bytes | None = None
-    values: dict[str, Any] = field(default_factory=dict)
 
 
-class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
+_LinkT = TypeVar("_LinkT", bound=_Link)
+# What a command needs: how to build its message from a sequence number, and
+# what to do once the thermostat accepted it.
+_Command = tuple[Callable[[int], bytes], Callable[[], None]]
+
+
+class DeviceGateway(ABC, Generic[_LinkT]):  # pylint: disable=too-many-instance-attributes
     """Accepts the connections of thermostats on the local network.
 
     Only thermostats in allowed_serials are served; any other connection is
     closed without an answer.
 
-    Set on_state to be told what the thermostats report, and on_upstream to
-    follow whether OJ's gateway can be used.
+    Set on_state to be told what the thermostats report, on_connected to be
+    told that a thermostat logged in, and on_upstream to follow whether OJ's
+    gateway can be used.
 
     The gateway keeps a history of what happened on its connections, which is
     also logged at debug level. It names serial numbers and addresses on the
@@ -368,6 +372,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         self.endpoint = endpoint
         self.allowed_serials: set[str] = set()
         self.on_state: StateListener | None = None
+        self.on_connected: ConnectListener | None = None
         self.on_upstream: UpstreamListener | None = None
         self.upstream_status: UpstreamStatus | None = None
         # The fingerprint of the certificate OJ's gateway showed last.
@@ -379,10 +384,13 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         self._listen_port = endpoint.port if listen_port is None else listen_port
         self._server: asyncio.Server | None = None
         self._tasks: set[asyncio.Task[None]] = set()
-        self._links: dict[str, _Link] = {}
+        self._links: dict[str, _LinkT] = {}
         self._sequence = _FIRST_SEQUENCE - 1
-        # When OJ's gateway could not be reached, on the clock of the loop.
+        # When OJ's gateway could not be reached, on the clock of the loop,
+        # and when it did not answer the login of a thermostat, by serial
+        # number: that says nothing about the other thermostats.
         self._upstream_failed_at: float | None = None
+        self._login_failed_at: dict[str, float] = {}
 
     @property
     def port(self) -> int | None:
@@ -445,6 +453,10 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
     # --- What a series says and expects ---------------------------------------
 
     @abstractmethod
+    def _new_link(self, serial: str, writer: asyncio.StreamWriter) -> _LinkT:
+        """Create the connection of a thermostat that logged in."""
+
+    @abstractmethod
     def _login_serial(self, message: Message) -> str | None:
         """Return the serial number in a login; None if it is not a login."""
 
@@ -469,29 +481,85 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         """Return the frames that answer a login when OJ's gateway does not."""
 
     @abstractmethod
-    def _reply(self, link: _Link, message: Message) -> bytes | None:
+    def _reply(self, link: _LinkT, message: Message) -> bytes | None:
         """Return the frames that answer a message of a thermostat, if any."""
 
     @abstractmethod
-    def _observe(self, link: _Link, message: Message) -> None:
+    def _observe(self, link: _LinkT, message: Message) -> None:
         """Keep what a thermostat reports, and pass it on to the listener."""
 
     @abstractmethod
-    def _observe_upstream(self, link: _Link, frame: bytes, message: Message) -> None:
-        """Keep what OJ's gateway sends a thermostat, and pass it on."""
+    def _observe_upstream(self, link: _LinkT, frame: bytes, message: Message) -> None:
+        """Look at a message of OJ's gateway while it is passed on.
+
+        The thermostat has not taken it over yet; see _delivered().
+        """
+
+    @abstractmethod
+    def _delivered(self, link: _LinkT, message: Message) -> None:
+        """Keep what a message of OJ's gateway changed, and pass it on.
+
+        Called once the thermostat accepted the message. The thermostat
+        answers in the order it received, so this and the acceptance of a
+        command of the gateway come in the order the thermostat applied them.
+        """
 
     # --- Commands -------------------------------------------------------------
 
-    def _link(self, serial: str) -> _Link:
+    def _link(self, serial: str) -> _LinkT:
         link = self._links.get(serial)
         if link is None:
             msg = "The thermostat is not connected to the gateway."
             raise OJMicrolineConnectionError(msg)
         return link
 
+    async def _command(
+        self, serial: str, prepare: Callable[[_LinkT], _Command]
+    ) -> None:
+        """Send a thermostat a command, one at a time per thermostat.
+
+        Args:
+        ----
+            serial: The serial number of the thermostat.
+            prepare: Returns how to build the command and what to do once it
+                is accepted, from what the connection knows by then. It
+                raises OJMicrolineConnectionError if the thermostat has not
+                reported what a command starts from.
+
+        Raises:
+        ------
+            OJMicrolineConnectionError: The thermostat is not connected, has
+                not reported its state yet, or disconnected before answering.
+            OJMicrolineTimeoutError: The thermostat did not answer in time.
+            OJMicrolineError: The thermostat refused the command.
+
+        """
+        link = self._link(serial)
+        async with link.lock:
+            if link.closed:
+                msg = "The thermostat disconnected from the gateway."
+                raise OJMicrolineConnectionError(msg)
+            build, accept = prepare(link)
+            await self._send_command(link, build, accept)
+
+    def _underway(self, link: _LinkT) -> list[Message]:
+        """Return what OJ's gateway sent a thermostat that is not answered yet.
+
+        The thermostat takes these over before a command that is sent now, so
+        that command has to start from them: built on what the thermostat
+        confirmed so far, it would undo them. A message without an answer for
+        LATE_ACKNOWLEDGE_TIMEOUT counts as lost, like a command.
+        """
+        recent = asyncio.get_running_loop().time() - LATE_ACKNOWLEDGE_TIMEOUT
+        return [
+            sent.message
+            for sent in link.unanswered
+            if sent.message is not None and sent.sent_at > recent
+        ]
+
     async def _send_command(
         self,
-        link: _Link,
+        link: _LinkT,
         build: Callable[[int], bytes],
         accept: Callable[[], None],
     ) -> None:
@@ -585,7 +653,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             self._sequence += 1
         return self._sequence
 
-    def _answered(self, link: _Link, message: Message) -> bool:
+    def _answered(self, link: _LinkT, message: Message) -> bool:
         """Match the answer of a thermostat with what it was sent.
 
         The thermostat answers in the order it received, so the answer belongs
@@ -602,9 +670,11 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         if sent is None:
             return False
         link.unanswered.remove(sent)
-        if sent.accept is None or sent.waiting is None:
-            return False
         answer = message.varint(_FIELD_ANSWER)
+        if sent.accept is None or sent.waiting is None:
+            if sent.message is not None and answer == _ACCEPTED:
+                self._delivered(link, sent.message)
+            return False
         seconds = asyncio.get_running_loop().time() - sent.sent_at
         late = seconds > ACKNOWLEDGE_TIMEOUT
         if answer == _ACCEPTED:
@@ -649,7 +719,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
     ) -> None:
         peer = writer.get_extra_info("peername")
         who = str(peer[0]) if peer else "an unknown address"
-        link: _Link | None = None
+        link: _LinkT | None = None
         try:
             await self._secure(writer, who)
             serial, login = await self._read_login(reader)
@@ -657,20 +727,21 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             if serial not in self.allowed_serials:
                 self._event("Refusing %s: it is not on the account", who)
                 return
-            link = _Link(serial, writer)
+            link = self._new_link(serial, writer)
             upstream = None
             if self.mode is GatewayMode.RELAY and self._upstream_is_worth_trying(link):
-                upstream = await self._open_upstream()
+                upstream = await self._login_upstream(link, login)
             if upstream is None:
                 await self._answer(reader, link, login)
             else:
-                await self._relay(reader, link, login, upstream)
+                await self._relay(reader, link, *upstream)
         except _HandshakeError:
             pass  # _secure() told why.
-        except (asyncio.IncompleteReadError, ConnectionError, ssl.SSLError):
-            self._event("The connection of %s was closed", who)
         except TimeoutError:
             self._event("Closing the connection of %s: it went quiet", who)
+        except (asyncio.IncompleteReadError, OSError) as error:
+            # Either side hung up, or the network under it went away.
+            self._event("The connection of %s was closed: %r", who, error)
         except ValueError as error:
             self._event(
                 "Closing the connection of %s after a malformed message: %s", who, error
@@ -696,7 +767,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
     # --- Answering a thermostat locally ---------------------------------------
 
     async def _answer(
-        self, reader: asyncio.StreamReader, link: _Link, login: bytes
+        self, reader: asyncio.StreamReader, link: _LinkT, login: bytes
     ) -> None:
         """Answer a thermostat the way OJ's gateway does, if that is possible."""
         if not self._can_answer(link.serial):
@@ -711,21 +782,19 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             await self._serve(reader, link)
         else:
             # The thermostat should be relayed: keep trying OJ's gateway.
-            retry = asyncio.create_task(self._retry_upstream(link))
+            retry = asyncio.create_task(self._retry_upstream(link, login))
             self._track(retry)
             try:
                 await self._serve(reader, link)
             finally:
                 retry.cancel()
 
-    async def _serve(self, reader: asyncio.StreamReader, link: _Link) -> None:
+    async def _serve(self, reader: asyncio.StreamReader, link: _LinkT) -> None:
         while True:
             async with asyncio.timeout(IDLE_TIMEOUT):
                 message = Message.parse(await read_frame(reader))
             self._log("Thermostat", link, message)
-            if self._login_serial(message) is not None:
-                msg = "A second login on the same connection"
-                raise ValueError(msg)
+            self._refuse_second_login(message)
             if self._is_answer(message):
                 self._answered(link, message)
                 continue
@@ -734,7 +803,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             if answer:
                 await self._write(link, answer)
 
-    async def _write(self, link: _Link, frames: bytes) -> None:
+    async def _write(self, link: _LinkT, frames: bytes) -> None:
         """Send a thermostat frames of the gateway's own.
 
         A recorded answer of OJ's gateway keeps the number OJ's gateway gave
@@ -746,20 +815,43 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         link.writer.write(frames)
         await link.writer.drain()
 
-    def _expect(self, link: _Link, message: Message) -> None:
-        """Note a message the thermostat will answer, before it is sent."""
+    def _expect(self, link: _LinkT, message: Message) -> _Sent | None:
+        """Note a message the thermostat will answer, before it is sent.
+
+        Returns
+        -------
+            What was noted; None for a message the thermostat does not answer.
+
+        """
         if not self._expects_answer(message):
-            return
+            return None
         number = message.varint(_FIELD_SEQUENCE) or 0
         self._forget_lost(link, number)
-        link.unanswered.append(_Sent(number))
+        sent = _Sent(number, sent_at=asyncio.get_running_loop().time())
+        link.unanswered.append(sent)
+        return sent
 
-    async def _retry_upstream(self, link: _Link) -> None:
-        """Make a thermostat connect again once OJ's gateway can be used."""
+    def _refuse_second_login(self, message: Message) -> None:
+        """Raise ValueError for a login on a connection that is logged in."""
+        try:
+            serial = self._login_serial(message)
+        except ValueError:
+            # Not a login this library knows, so not one to refuse either.
+            return
+        if serial is not None:
+            msg = "A second login on the same connection"
+            raise ValueError(msg)
+
+    async def _retry_upstream(self, link: _LinkT, login: bytes) -> None:
+        """Make a thermostat connect again once OJ's gateway can be used.
+
+        Only a gateway that answers the login of the thermostat is worth
+        that: the thermostat cannot be reached while it connects again.
+        """
         upstream = None
         while upstream is None:
             await asyncio.sleep(UPSTREAM_RETRY_INTERVAL)
-            upstream = await self._open_upstream()
+            upstream = await self._login_upstream(link, login)
         upstream[1].close()
         self._event(
             "OJ's gateway can be used again; reconnecting thermostat %s", link.serial
@@ -769,17 +861,25 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
 
     # --- Relaying a thermostat to OJ's gateway --------------------------------
 
-    def _upstream_is_worth_trying(self, link: _Link) -> bool:
+    def _upstream_is_worth_trying(self, link: _LinkT) -> bool:
         """Tell whether a new connection should wait for OJ's gateway.
 
         A thermostat gives up on its login within a few seconds and connects
         again. Waiting for a gateway that could not be used a moment ago would
         keep it from ever being answered, so it is answered locally at once.
         """
-        if self._upstream_failed_at is None or not self._can_answer(link.serial):
+        failures = [
+            moment
+            for moment in (
+                self._upstream_failed_at,
+                self._login_failed_at.get(link.serial),
+            )
+            if moment is not None
+        ]
+        if not failures or not self._can_answer(link.serial):
             # Without a local answer OJ's gateway is the only way.
             return True
-        waited = asyncio.get_running_loop().time() - self._upstream_failed_at
+        waited = asyncio.get_running_loop().time() - max(failures)
         if waited >= UPSTREAM_RETRY_INTERVAL:
             return True
         self._event(
@@ -793,7 +893,10 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
     async def _open_upstream(
         self,
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
-        """Connect to OJ's gateway; None if it is unreachable or not trusted."""
+        """Connect to OJ's gateway; None if it is unreachable or not trusted.
+
+        A connection alone does not make it usable: _login_upstream() tells.
+        """
         try:
             async with asyncio.timeout(UPSTREAM_TIMEOUT):
                 reader, writer = await asyncio.open_connection(
@@ -809,8 +912,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
                 self.endpoint.upstream_ip,
                 error,
             )
-            self._upstream_failed_at = asyncio.get_running_loop().time()
-            self._set_upstream(UpstreamStatus.UNREACHABLE)
+            self._upstream_failed(UpstreamStatus.UNREACHABLE)
             return None
         certificate = writer.get_extra_info("ssl_object").getpeercert(binary_form=True)
         pin = self.endpoint.pin_sha256.replace(":", "").lower()
@@ -818,12 +920,15 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
         if self.upstream_fingerprint != pin:
             writer.close()
             # Asking again at once would only find the same certificate.
-            self._upstream_failed_at = asyncio.get_running_loop().time()
-            self._set_upstream(UpstreamStatus.UNTRUSTED)
+            self._upstream_failed(UpstreamStatus.UNTRUSTED)
             return None
         self._upstream_failed_at = None
-        self._set_upstream(UpstreamStatus.CONNECTED)
         return reader, writer
+
+    def _upstream_failed(self, status: UpstreamStatus) -> None:
+        """Leave OJ's gateway alone for a while, for every thermostat."""
+        self._upstream_failed_at = asyncio.get_running_loop().time()
+        self._set_upstream(status)
 
     def _set_upstream(self, status: UpstreamStatus) -> None:
         if status is self.upstream_status:
@@ -843,19 +948,76 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             )
         self._notify(self.on_upstream, status)
 
+    async def _login_upstream(
+        self, link: _LinkT, login: bytes
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, bytes] | None:
+        """Connect to OJ's gateway and log a thermostat in there.
+
+        A gateway that takes the connection and then stays silent or hangs up
+        is as useless as one that cannot be reached. It is left alone for a
+        while then, for this thermostat only: the others may still get an
+        answer. The thermostat is answered locally, at once if it still
+        waits, and on its next connection otherwise.
+
+        Returns
+        -------
+            The connection and the first message of OJ's gateway; None if
+            that gateway cannot be used for this thermostat.
+
+        """
+        upstream = await self._open_upstream()
+        if upstream is None:
+            return None
+        reader, writer = upstream
+        first = None
+        try:
+            async with asyncio.timeout(UPSTREAM_TIMEOUT):
+                writer.write(encode_frame(login))
+                await writer.drain()
+                first = await read_frame(reader)
+        except (asyncio.IncompleteReadError, OSError, ValueError) as error:
+            # TimeoutError is an OSError: silent, hung up, or not a frame.
+            self._event(
+                "OJ's gateway at %s did not answer the login of thermostat %s: %r",
+                self.endpoint.upstream_ip,
+                link.serial,
+                error,
+            )
+            self._login_failed_at[link.serial] = asyncio.get_running_loop().time()
+            self._set_upstream(UpstreamStatus.UNREACHABLE)
+            return None
+        finally:
+            if first is None:
+                # Nothing else holds the connection yet, so a gateway that
+                # stops while this waits must not leave it open either.
+                writer.close()
+        self._login_failed_at.pop(link.serial, None)
+        self._set_upstream(UpstreamStatus.CONNECTED)
+        return reader, writer, first
+
     async def _relay(
         self,
         reader: asyncio.StreamReader,
-        link: _Link,
-        login: bytes,
-        upstream: tuple[asyncio.StreamReader, asyncio.StreamWriter],
+        link: _LinkT,
+        upstream_reader: asyncio.StreamReader,
+        upstream_writer: asyncio.StreamWriter,
+        first: bytes,
     ) -> None:
-        """Pass a connection on to OJ's gateway, until either side closes it."""
-        upstream_reader, upstream_writer = upstream
+        """Pass a connection on to OJ's gateway, until either side closes it.
+
+        Args:
+        ----
+            reader: The connection of the thermostat.
+            link: The thermostat.
+            upstream_reader: The connection to OJ's gateway, which has the
+                login.
+            upstream_writer: The same connection, to write to.
+            first: The first message of OJ's gateway, see _login_upstream().
+
+        """
         link.upstream = upstream_writer
-        upstream_writer.write(encode_frame(login))
-        await upstream_writer.drain()
         self._connected(link)
+        await self._hand_down(link, first)
         pumps = [
             asyncio.create_task(self._pass_up(reader, link, upstream_writer)),
             asyncio.create_task(self._pass_down(upstream_reader, link)),
@@ -872,7 +1034,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
     async def _pass_up(
         self,
         reader: asyncio.StreamReader,
-        link: _Link,
+        link: _LinkT,
         upstream: asyncio.StreamWriter,
     ) -> None:
         """Pass the messages of a thermostat on to OJ's gateway."""
@@ -883,7 +1045,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
                 upstream.write(encode_frame(body))
                 await upstream.drain()
 
-    def _pass_on(self, link: _Link, body: bytes) -> bool:
+    def _pass_on(self, link: _LinkT, body: bytes) -> bool:
         """Look at a message of a relayed thermostat; False if it stays here.
 
         What the gateway does not understand still goes to OJ's gateway, so a
@@ -902,9 +1064,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             )
             return True
         self._log("Thermostat", link, message)
-        if self._login_serial(message) is not None:
-            msg = "A second login on the same connection"
-            raise ValueError(msg)
+        self._refuse_second_login(message)
         if self._is_answer(message):
             # The answer to a command of the gateway stays here: OJ's gateway
             # never sent that command.
@@ -919,34 +1079,39 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             )
         return True
 
-    async def _pass_down(self, upstream: asyncio.StreamReader, link: _Link) -> None:
+    async def _pass_down(self, upstream: asyncio.StreamReader, link: _LinkT) -> None:
         """Pass the messages of OJ's gateway on to a thermostat."""
         while True:
-            body = await read_frame(upstream)
-            frame = encode_frame(body)
-            try:
-                message = Message.parse(body)
-            except ValueError:
-                message = None
-            if message is not None:
-                # Noted before it is sent, so the order of the answers holds.
-                self._expect(link, message)
-            link.writer.write(frame)
-            await link.writer.drain()
-            # The message is on its way; what follows only looks at it.
-            if message is None or not self._inspect(link, frame, message):
-                self._event(
-                    "OJ's gateway sent thermostat %s a message of %s bytes that is "
-                    "not understood",
-                    link.serial,
-                    len(body),
-                )
+            await self._hand_down(link, await read_frame(upstream))
 
-    def _inspect(self, link: _Link, frame: bytes, message: Message) -> bool:
+    async def _hand_down(self, link: _LinkT, body: bytes) -> None:
+        """Pass one message of OJ's gateway on to a thermostat."""
+        frame = encode_frame(body)
+        try:
+            message = Message.parse(body)
+        except ValueError:
+            message = None
+        # Noted before it is sent, so the order of the answers holds.
+        sent = None if message is None else self._expect(link, message)
+        link.writer.write(frame)
+        # The message is on its way; what follows only looks at it.
+        if message is None or not self._inspect(link, frame, message):
+            self._event(
+                "OJ's gateway sent thermostat %s a message of %s bytes that is "
+                "not understood",
+                link.serial,
+                len(body),
+            )
+        elif sent is not None:
+            # What it changes counts once the thermostat accepted it, see
+            # _delivered(); until then a command starts from it as well.
+            sent.message = message
+        await link.writer.drain()
+
+    def _inspect(self, link: _LinkT, frame: bytes, message: Message) -> bool:
         """Look at a message of OJ's gateway; False if it cannot be decoded."""
         self._log("OJ's gateway", link, message)
         try:
-            # A change made in the vendor's app arrives as a command.
             self._observe_upstream(link, frame, message)
         except ValueError:
             return False
@@ -954,7 +1119,7 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
 
     # --- What both ways of serving share --------------------------------------
 
-    def _connected(self, link: _Link) -> None:
+    def _connected(self, link: _LinkT) -> None:
         previous = self._links.get(link.serial)
         self._links[link.serial] = link
         if previous is not None:
@@ -968,8 +1133,9 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             else "answered locally",
         )
         self._notify(self.on_state, link.serial, {"Online": True})
+        self._notify(self.on_connected, link.serial)
 
-    def _disconnected(self, link: _Link) -> None:
+    def _disconnected(self, link: _LinkT) -> None:
         self._close(link)
         # A newer connection of the same thermostat keeps it online.
         if self._links.get(link.serial) is link:
@@ -992,9 +1158,13 @@ class DeviceGateway(ABC):  # pylint: disable=too-many-instance-attributes
             link.upstream.close()
 
     def _log(self, sender: str, link: _Link, message: Message) -> None:
-        self._event(
-            "%s (thermostat %s): %s", sender, link.serial, self._describe(message)
-        )
+        try:
+            described = self._describe(message)
+        except (ValueError, ArithmeticError, LookupError, TypeError):
+            # A line in the log must never end a connection.
+            numbers = ",".join(str(number) for number in sorted(message.numbers))
+            described = f"fields={numbers} (cannot be described)"
+        self._event("%s (thermostat %s): %s", sender, link.serial, described)
 
     def _event(
         self, message: str, *arguments: object, level: int = logging.DEBUG

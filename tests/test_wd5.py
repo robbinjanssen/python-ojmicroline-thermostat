@@ -202,8 +202,10 @@ async def test_get_thermostats_failed(aresponses: ResponsesMockServer) -> None:
         api._session_id = "f00b4r"
         client = OJMicroline(api=api, session=session)
 
-        with pytest.raises(OJMicrolineResultsError):
+        with pytest.raises(OJMicrolineResultsError) as raised:
             await client.get_thermostats()
+        # The answer stays out of the error, which ends up in logs.
+        assert raised.value.args == ("Unable to get thermostats via API.",)
 
 
 @pytest.mark.asyncio
@@ -306,8 +308,9 @@ async def test_get_energy_usage_failed(aresponses: ResponsesMockServer) -> None:
         api._session_id = "f00b4r"
         client = OJMicroline(api=api, session=session)
 
-        with pytest.raises(OJMicrolineResultsError):
+        with pytest.raises(OJMicrolineResultsError) as raised:
             await client.get_energy_usage(thermostat)
+        assert raised.value.args == ("Unable to get energy usage via API.",)
 
 
 @pytest.mark.asyncio

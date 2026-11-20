@@ -91,8 +91,9 @@ class WG4API(SessionOJMicrolineAPI):
 
         """
         if not data.get("EnergyUsage"):
+            # The answer stays out of the error, which ends up in logs.
             msg = "Unable to get energy usage via API."
-            raise OJMicrolineResultsError(msg, {"data": data})
+            raise OJMicrolineResultsError(msg)
 
         return [
             day["EnergyKWattHour"]

@@ -124,7 +124,14 @@ The thermostat acknowledges in the order it received. The gateway keeps what
 it sent the thermostat and what OJ's gateway sent, in that order, and gives
 an acknowledgement to the oldest message with its number. Once the thermostat
 accepts a command, the state of that command is the basis for the next one and
-is reported as the new state. That also holds for an acknowledgement that
+is reported as the new state. A command of OJ's gateway counts the same way,
+once the thermostat accepted it: the thermostat answers in the order in which
+it took the states over, so the last one that was accepted is the one it
+holds. A command of the gateway that is built while one of OJ's gateway is
+still on its way starts from that one, because the thermostat takes it over
+first; built on what the thermostat confirmed so far, it would undo a change
+made in the vendor's app a moment before. That also holds for an
+acknowledgement that
 comes after the 40 seconds: the caller got an error by then, but the
 thermostat did change. After 60 seconds a command without an answer counts as
 lost, and so does one whose 40 seconds are over once OJ's gateway sends a
@@ -151,7 +158,9 @@ half a minute the thermostat took in nothing at all, not even at the TCP
 level, while the network was fine. Two other commands were acknowledged after
 5.6 and 0.6 seconds. The router of that tester names the thermostat's Wi-Fi
 module HF-LPB100. A Wi-Fi module that saves power by not listening for a
-while fits all of this. The gateway therefore waits 40 seconds.
+while fits all of this. The gateway therefore waits 40 seconds. Seen on 18
+November on the same thermostat: a command sent 8 seconds before a heartbeat
+was acknowledged right after that heartbeat, 8.8 seconds after it was sent.
 
 ## Relaying
 
@@ -166,7 +175,7 @@ OJ's gateway.
 
 A change made in the vendor's app reaches the thermostat as a command of OJ's
 gateway, in the shape described above. The gateway reports it as the new
-state.
+state once the thermostat accepted it.
 
 The two answers that follow the uploads are recorded as the thermostat's
 profile: the configuration answer is a message with field 10 and otherwise
@@ -176,18 +185,33 @@ thermostat accepted the two answers of the captured session when another
 gateway repeated them.
 
 If OJ's gateway cannot be reached or is not trusted, a thermostat with a
-profile is answered locally. The gateway then tries OJ's gateway every five
-minutes, and disconnects the thermostat once it works, so the thermostat
-connects again and is relayed. Seen: the thermostat connected again about 60
-seconds after the gateway closed its connection, and could not be reached in
-between.
+profile is answered locally. The same goes for a gateway that takes the
+connection and then does not answer the login within 3 seconds, or hangs up:
+relaying to it again would keep the thermostat from ever being answered. A
+login without an answer only counts against that thermostat: OJ's gateway is
+still tried for the others. The gateway then tries OJ's gateway every five
+minutes, with the login of the thermostat, and disconnects the thermostat
+once that login is answered, so the thermostat connects again and is relayed.
+Seen: the thermostat connected again about 60 seconds after the gateway
+closed its connection, and could not be reached in between. That is why a
+gateway that connects and stays silent is not worth a reconnect.
 
-OJ's gateway gets 3 seconds to accept a connection. For five minutes after it
-could not be reached, or showed a certificate that does not match the pin, a
+OJ's gateway gets 3 seconds to accept a connection, and 3 more to answer the
+login. For five minutes after it could not be reached, showed a certificate
+that does not match the pin, or left the login of a thermostat unanswered, a
 thermostat with a profile is answered locally at once, without another
 attempt. Seen: with a wait of 10 seconds on every new
 connection, a thermostat was never answered while OJ's gateway was
 unreachable, because it gives up on its login sooner than that.
+
+### What the cloud makes of a command of the gateway
+
+Reported on 18 November, for a WG4 thermostat with firmware 1012M201 in relay
+mode: after the gateway set the manual mode at 65 °F, the reloaded website of
+mythermostat.info showed "On Manual Permanently" at 65 °F, and a new session of
+the cloud API read mode 3 with that setpoint. The WG4 cloud takes over the
+state the thermostat reports, so a command of the gateway shows in the
+vendor's website. The WD5 cloud does not, see [State and commands](#state-and-commands).
 
 ## Time
 
@@ -211,9 +235,6 @@ These need a real thermostat to answer.
 - Does OJ's gateway send the configuration and support answers on every new
   connection? Seen: on each of three connections of a thermostat that was
   already set up.
-- After a command of the gateway, does the thermostat report its new state to
-  OJ's gateway? If not, the vendor's app shows the old state until the next
-  upload.
 - Does the configuration answer depend on settings a user can change? If it
   does, local mode repeats old settings at every reconnect.
 - Do firmware updates use this connection?
@@ -315,10 +336,16 @@ thermostat, and 1970-01-01 means that one is not set.
 
 A command is a message with 4 = 1 and a complete state in field 9, which the
 thermostat takes over as a whole. The thermostat itself only reports the part
-of its state that matters in its mode, so that is no base for a command. The
-gateway starts from the last command the thermostat was sent on the
-connection, by OJ's gateway or by itself. Before any command it builds the
-state from what the thermostat reported and what the cloud API knows of it.
+of its state that matters in its mode, so that is no base for a command.
+
+The gateway builds the base in three layers. It starts from what the
+thermostat reported and what the cloud API knows of it. Over that goes the
+last command the thermostat accepted on the connection, of OJ's gateway or of
+the gateway itself, or one of OJ's gateway that is still on its way: a
+command of OJ's gateway may leave parts out, which then come from the first
+layer, and everything it does hold goes back byte for byte. Over that goes
+what the thermostat reported since,
+so a setpoint that was changed at the wall is not undone by the next command.
 That includes the vacation: left out, a command would erase a vacation the
 thermostat has stored. A setpoint that nobody knows becomes a default.
 
@@ -354,7 +381,9 @@ only sends it itself when the cloud does not reach the thermostat.
 - Whether the time zone a thermostat reports (7.3) includes summer time.
   Seen: 3600 in November, in Central European time. The end of a comfort
   hold or a boost is written in the local time of the thermostat, so an hour
-  of difference would show there in summer. A time zone west of UTC has not
+  of difference would show there in summer. The ioBroker adapter computes
+  the end the same way, was used through a summer, and names 3600 and 7200
+  as time zones, which suggests that the time zone does include it. A time zone west of UTC has not
   been seen either; it is read as a negative number.
 - Which fields of a state OJ's gateway always sends. Its logged commands
   differ: one for the manual mode had no vacation and no boost.

@@ -54,7 +54,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ojmicroline_thermostat.const import (
     REGULATION_BOOST,
@@ -68,6 +68,7 @@ from ojmicroline_thermostat.const import (
 
 from .protobuf import (
     LENGTH_DELIMITED,
+    VARINT,
     Message,
     brief,
     encode_field,
@@ -78,7 +79,7 @@ from .protobuf import (
 from .wg4 import device_time
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Mapping
 
 FIELD_SEQUENCE = 1
 FIELD_ACKNOWLEDGED = 3
@@ -86,7 +87,6 @@ FIELD_WANTS_ANSWER = 4
 FIELD_LOGIN = 5
 FIELD_TELEMETRY = 6
 FIELD_DEVICE_INFO = 7
-FIELD_SCHEDULE = 8
 FIELD_STATE = 9
 FIELD_UPLOAD_REQUEST = 10
 FIELD_SERVER_TIME = 12
@@ -105,14 +105,6 @@ _TELEMETRY_HEATING = 4
 _INFO_NAME = 2
 _INFO_TIME_ZONE = 3
 _INFO_LOAD = 17
-_SCHEDULE_WEEK = 2
-_WEEK_DAY = 1
-_DAY_NUMBER = 1
-_DAY_EVENT = 2
-_EVENT_CLOCK = 1
-_EVENT_TEMPERATURE = 2
-_EVENT_ACTIVE = 3
-_EVENT_NEXT_DAY = 4
 _STATE_TIME = 1
 _STATE_MODE = 2
 _STATE_COMFORT = 3
@@ -133,6 +125,19 @@ _UPLOAD_FULL = 2
 _SERVER_TIME = 1
 _END_DAY = 1
 _END_CLOCK = 2
+
+# The parts of a state that hold several values of their own.
+_STATE_PARTS = frozenset(
+    {
+        _STATE_COMFORT,
+        _STATE_MANUAL,
+        _STATE_VACATION,
+        _STATE_BOOST,
+        _STATE_FROST_PROTECTION,
+    }
+)
+# The wire types set_field() writes.
+_SETTABLE = frozenset({VARINT, LENGTH_DELIMITED})
 
 _EMPTY = Message(())
 _UNSET_DAY = date(1970, 1, 1)
@@ -422,33 +427,6 @@ def decode_state(message: Message) -> dict[str, Any]:
     )
 
 
-def decode_schedule(message: Message) -> dict[str, Any] | None:
-    """Translate the schedule of a message to the Schedule of the cloud API.
-
-    The result has the days and events of that Schedule, in the order the
-    thermostat sent them, without ScheduleType and ModifiedDueToVerification:
-    the thermostat sends neither. A part of a day or an event that it did not
-    send is left out as well.
-
-    Args:
-    ----
-        message: A message from the thermostat.
-
-    Returns:
-    -------
-        The schedule, or None if the message has none.
-
-    Raises:
-    ------
-        ValueError: The schedule is malformed.
-
-    """
-    week = _nested(message, FIELD_SCHEDULE).message(_SCHEDULE_WEEK)
-    if week is None:
-        return None
-    return {"Days": [_decode_day(day) for day in _repeated(week, _WEEK_DAY)]}
-
-
 def decode_date_time(fields: Message | None) -> str | None:
     """Return an end, {1 a day, 2 a time}, the way the cloud API writes it.
 
@@ -527,8 +505,7 @@ def local_in(minutes: int, time_zone: int, moment: datetime | None = None) -> da
 
     Returns:
     -------
-        That time in the time zone of the thermostat, for changed_state() and
-        vacation_mode().
+        That time in the time zone of the thermostat, for changed_state().
 
     Raises:
     ------
@@ -641,8 +618,8 @@ def changed_state(  # noqa: PLR0913 # pylint: disable=too-many-arguments
             passed unless the thermostat is in that mode. With another mode,
             or without one, it is ignored.
         vacation: The vacation to store. Its setpoint stays as it is, as in
-            the commands of OJ's gateway. See vacation_mode() for the mode
-            that goes with it.
+            the commands of OJ's gateway. A vacation that has begun goes with
+            the vacation mode, which this does not set.
 
     Returns:
     -------
@@ -684,6 +661,91 @@ def changed_state(  # noqa: PLR0913 # pylint: disable=too-many-arguments
     return changed
 
 
+def merged_state(state: bytes, reported: bytes) -> bytes:
+    """Return a state with what another state holds laid over it.
+
+    A thermostat only reports the part of its state that matters in its mode,
+    and a command of OJ's gateway may leave parts out. Every value the other
+    state holds replaces that of the state; everything else stays as it is.
+
+    Args:
+    ----
+        state: A state (field 9), such as the last command a thermostat took.
+        reported: The state to lay over it, such as what the thermostat
+            reported since.
+
+    Returns:
+    -------
+        The encoded state.
+
+    Raises:
+    ------
+        ValueError: One of the states is malformed.
+
+    """
+    for part in Message.parse(reported).fields:
+        if part.number in _STATE_PARTS:
+            if part.wire_type != LENGTH_DELIMITED:
+                # Not the part this library knows; the state keeps its own.
+                continue
+            # A setpoint that is reported must not erase the end beside it.
+            content = _content(state, part.number)
+            for value in Message.parse(cast("bytes", part.value)).fields:
+                if value.wire_type in _SETTABLE:
+                    content = set_field(content, value.number, value.value)
+            state = set_field(state, part.number, content)
+        elif part.wire_type in _SETTABLE:
+            state = set_field(state, part.number, part.value)
+    return state
+
+
+def completed_state(state: bytes, known: bytes) -> bytes:
+    """Return a state with what it leaves out taken from another state.
+
+    A command of OJ's gateway may leave parts out, while a thermostat takes a
+    command over as a whole. Nothing the state holds changes, down to what is
+    not understood in it: only what is missing comes from the other state.
+
+    Args:
+    ----
+        state: A state (field 9), such as the last command a thermostat took.
+        known: A complete state built from what is known, see default_state().
+
+    Returns:
+    -------
+        The encoded state.
+
+    Raises:
+    ------
+        ValueError: One of the states is malformed.
+
+    """
+    held = Message.parse(state)
+    for part in Message.parse(known).fields:
+        if part.wire_type not in _SETTABLE:
+            continue
+        if part.number not in held:
+            state = set_field(state, part.number, part.value)
+            continue
+        content = held.data(part.number)
+        if (
+            part.number not in _STATE_PARTS
+            or part.wire_type != LENGTH_DELIMITED
+            # Not the part this library knows; the state keeps its own.
+            or content is None
+            or held.count(part.number) > 1
+        ):
+            continue
+        values = Message.parse(content)
+        completed = content
+        for value in Message.parse(cast("bytes", part.value)).fields:
+            if value.wire_type in _SETTABLE and value.number not in values:
+                completed = set_field(completed, value.number, value.value)
+        if completed != content:
+            state = set_field(state, part.number, completed)
+    return state
+
+
 def command(sequence: int, state: bytes) -> bytes:
     """Build the message that makes the thermostat take over a state.
 
@@ -702,34 +764,6 @@ def command(sequence: int, state: bytes) -> bytes:
         + encode_field(FIELD_WANTS_ANSWER, 1)
         + encode_field(FIELD_STATE, state)
     )
-
-
-def vacation_mode(vacation: Vacation, mode: int | None, today: date) -> int | None:
-    """Return the regulation mode that goes with a change of the vacation.
-
-    OJ's gateway puts a thermostat in the vacation mode at once if the
-    vacation has begun. That a thermostat in the vacation mode returns to the
-    schedule when its vacation is disabled or moved away is assumed.
-
-    Args:
-    ----
-        vacation: The vacation to store.
-        mode: The regulation mode the thermostat is in, if that is known.
-        today: The day it is at the thermostat, see local_in().
-
-    Returns:
-    -------
-        The mode to pass to changed_state(); None keeps the mode.
-
-    """
-    if (
-        vacation.enabled
-        and vacation.begin is not None
-        and vacation.end is not None
-        and _ordinal(vacation.begin) <= _ordinal(today) <= _ordinal(vacation.end)
-    ):
-        return REGULATION_VACATION
-    return REGULATION_SCHEDULE if mode == REGULATION_VACATION else None
 
 
 def describe(message: Message) -> str:
@@ -783,17 +817,6 @@ def _nested(fields: Message, number: int) -> Message:
     """Return a nested message, which is empty if the field is not there."""
     nested = fields.message(number)
     return _EMPTY if nested is None else nested
-
-
-def _repeated(fields: Message, number: int) -> Iterator[Message]:
-    """Parse every occurrence of a field that holds a nested message."""
-    for field in fields.fields:
-        if (
-            field.number == number
-            and field.wire_type == LENGTH_DELIMITED
-            and isinstance(field.value, bytes)
-        ):
-            yield Message.parse(field.value)
 
 
 def _content(data: bytes, number: int) -> bytes:
@@ -855,11 +878,6 @@ def _clock(fields: Message | None) -> time | None:
         return None
 
 
-def _ordinal(day: date) -> tuple[int, int, int]:
-    """Return what orders days, also when one of them comes with a time."""
-    return (day.year, day.month, day.day)
-
-
 def _with_numbers(data: bytes, *numbers: int) -> bytes:
     """Set fields 1, 2 and so on, and keep whatever else the message holds."""
     for number, value in enumerate(numbers, start=1):
@@ -880,29 +898,6 @@ def _with_end(data: bytes, local: datetime | None) -> bytes:
     data = set_field(data, _END_DAY, _with_day(_content(data, _END_DAY), local))
     return set_field(
         data, _END_CLOCK, _with_numbers(_content(data, _END_CLOCK), *clock)
-    )
-
-
-def _decode_day(day: Message) -> dict[str, Any]:
-    """Translate a day of the schedule."""
-    return _reported(
-        {
-            "WeekDayGrpNo": day.varint(_DAY_NUMBER),
-            "Events": [_decode_event(event) for event in _repeated(day, _DAY_EVENT)],
-        }
-    )
-
-
-def _decode_event(event: Message) -> dict[str, Any]:
-    """Translate an event of the schedule."""
-    clock = _clock(event.message(_EVENT_CLOCK))
-    return _reported(
-        {
-            "Clock": None if clock is None else clock.isoformat(),
-            "Temperature": event.varint(_EVENT_TEMPERATURE),
-            "Active": _flag(event, _EVENT_ACTIVE),
-            "EventIsOnNextDay": _flag(event, _EVENT_NEXT_DAY),
-        }
     )
 
 

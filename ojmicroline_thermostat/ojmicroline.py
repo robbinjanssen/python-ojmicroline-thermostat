@@ -27,6 +27,8 @@ from .exceptions import (
     OJMicrolineAuthError,
     OJMicrolineConnectionError,
     OJMicrolineError,
+    OJMicrolineHTTPError,
+    OJMicrolineResultsError,
     OJMicrolineTimeoutError,
     OJMicrolineUnauthorizedError,
 )
@@ -170,15 +172,27 @@ class SessionOJMicrolineAPI:
 
         Raises
         ------
-            OJMicrolineResultsError: The API reported an error.
+            OJMicrolineResultsError: The API reported an error, or its answer
+                is not what the API is known to return.
 
         """
-        data = await self.request(
+        data = await self._fetch_thermostats()
+        try:
+            items = self.thermostat_items(data)
+            return {str(item["SerialNumber"]): item for item in items}
+        except (AttributeError, KeyError, TypeError) as error:
+            # The answer itself stays out of the error: it may hold the email
+            # address of the account, and an error ends up in logs.
+            msg = "The API returned thermostats in a form that is not understood."
+            raise OJMicrolineResultsError(msg) from error
+
+    async def _fetch_thermostats(self) -> Any:
+        """Ask the API for the thermostats and return its answer as it is."""
+        return await self.request(
             self.get_thermostats_path,
             method=hdrs.METH_GET,
             params={"sessionid": self._session_id, **self.get_thermostats_params()},
         )
-        return {str(item["SerialNumber"]): item for item in self.thermostat_items(data)}
 
     def parse_energy_usage_response(self, data: Any) -> list[float]:
         """Parse an HTTP response containing energy usage data."""
@@ -238,14 +252,7 @@ class SessionOJMicrolineAPI:
             A list of Thermostats objects.
 
         """
-        data = await self.request(
-            self.get_thermostats_path,
-            method=hdrs.METH_GET,
-            params={
-                "sessionid": self._session_id,
-                **self.get_thermostats_params(),
-            },
-        )
+        data = await self._fetch_thermostats()
         thermostats = self.parse_thermostats_response(data)
 
         for thermostat in thermostats:
@@ -415,18 +422,19 @@ class OJMicroline:
                 msg = "The OJ Microline API rejected the session (HTTP 401)."
                 raise OJMicrolineUnauthorizedError(msg) from exception
             msg = f"The OJ Microline API responded with HTTP {exception.status}."
-            raise OJMicrolineConnectionError(msg) from exception
+            raise OJMicrolineHTTPError(msg, exception.status) from exception
         except (ClientError, socket.gaierror) as exception:
             msg = "Error occurred while communicating with the OJ Microline API."
             raise OJMicrolineConnectionError(msg) from exception
 
         content_type = response.headers.get("Content-Type", "")
         if not any(item in content_type for item in ["application/json"]):
-            text = await response.text()
-            msg = "Unexpected content type response from the OJ Microline API"
-            raise OJMicrolineError(
-                msg, {"Content-Type": content_type, "response": text}
+            # The answer itself stays out of the error, which ends up in logs.
+            msg = (
+                "Unexpected content type response from the OJ Microline API: "
+                f"{content_type!r}"
             )
+            raise OJMicrolineError(msg)
 
         return json.loads(await response.text())
 

@@ -40,10 +40,10 @@ from ojmicroline_thermostat.gateway.wd5 import (
     answer,
     changed_state,
     command,
+    completed_state,
     decode_date,
     decode_date_time,
     decode_login,
-    decode_schedule,
     decode_state,
     decode_telemetry,
     default_state,
@@ -53,12 +53,12 @@ from ojmicroline_thermostat.gateway.wd5 import (
     is_answer,
     local_in,
     login_answer,
+    merged_state,
     upload_request,
-    vacation_mode,
     wants_answer,
 )
 from ojmicroline_thermostat.gateway.wg4 import EPOCH, device_time
-from ojmicroline_thermostat.models import Schedule, Thermostat
+from ojmicroline_thermostat.models import Thermostat
 
 from . import load_fixtures
 
@@ -532,20 +532,12 @@ def test_decoded_fields_are_those_of_the_cloud() -> None:
     ) + encode_field(9, VACATION_STATE)
     fields = decode_state(Message.parse(everything))
     fields |= decode_telemetry(Message.parse(HEARTBEAT))
-    schedule = decode_schedule(Message.parse(SCHEDULE))
-    assert schedule is not None
 
     # The load of the floor is the one value the cloud API does not have.
     assert set(fields) - set(data) == {"LoadWatts"}
     assert len(fields) == 16
-    assert set(schedule) <= set(data["Schedule"])
-    assert set(schedule["Days"][0]) == set(data["Schedule"]["Days"][0])
-    assert set(schedule["Days"][0]["Events"][0]) == (
-        set(data["Schedule"]["Days"][0]["Events"][0]) - {"ScheduleType"}
-    )
 
     data.update(fields)
-    data["Schedule"] = schedule
     thermostat = Thermostat.from_wd5_json(data)
     assert thermostat.name == "Bad"
     assert thermostat.heating is True
@@ -562,95 +554,6 @@ def test_decoded_fields_are_those_of_the_cloud() -> None:
     # An end that is not set is still a date for the model.
     assert thermostat.boost_end_time is not None
     assert thermostat.boost_end_time.year < 1971
-    assert thermostat.schedule == schedule
-
-
-def test_decode_schedule() -> None:
-    """The schedule has the shape of the Schedule of the cloud API."""
-    assert decode_schedule(Message.parse(SCHEDULE)) == {
-        "Days": [
-            {
-                "WeekDayGrpNo": 1,
-                "Events": [
-                    {
-                        "Clock": "06:30:00",
-                        "Temperature": 2350,
-                        "Active": True,
-                        "EventIsOnNextDay": False,
-                    },
-                    {
-                        "Clock": "00:15:30",
-                        "Temperature": 1500,
-                        "Active": False,
-                        "EventIsOnNextDay": True,
-                    },
-                ],
-            },
-            {"WeekDayGrpNo": 2, "Events": []},
-        ]
-    }
-
-
-def test_decode_schedule_fits_the_model() -> None:
-    """The Schedule model reads a decoded schedule."""
-    decoded = decode_schedule(Message.parse(SCHEDULE))
-    assert decoded is not None
-    schedule = Schedule.from_json(decoded)
-
-    # Monday is day 0 of the model, and only its active event counts.
-    assert [event.temperature for event in schedule.days[0]] == [2350]
-    assert schedule.days[1] == []
-
-
-def test_decode_schedule_without_schedule() -> None:
-    """A message without a schedule, or a schedule without a week, has none."""
-    assert decode_schedule(Message.parse(UPLOAD)) is None
-    assert decode_schedule(Message.parse(encode_field(8, b""))) is None
-    assert decode_schedule(Message.parse(encode_field(8, encode_field(1, 5)))) is None
-    assert decode_schedule(Message.parse(encode_field(8, encode_field(2, 5)))) is None
-
-    # A week without days is a schedule without days.
-    empty = Message.parse(encode_field(8, encode_field(2, b"")))
-    assert decode_schedule(empty) == {"Days": []}
-
-
-def test_decode_schedule_with_missing_parts() -> None:
-    """Only what the thermostat sent is returned, and what is no day is skipped."""
-    day = (
-        # An event that is a number is not an event.
-        encode_field(2, 7)
-        # An event with a clock that is not a time, and one with only a flag.
-        + encode_field(2, encode_field(1, _clock(24, 0)) + encode_field(2, 2000))
-        + encode_field(2, encode_field(3, 1))
-        + encode_field(2, b"")
-    )
-    week = (
-        # A day that is a number, and one that is a fixed32, are not days.
-        encode_field(1, 3)
-        + bytes([1 << 3 | 5, 1, 2, 3, 4])
-        + encode_field(1, day)
-        # Another field of the week.
-        + encode_field(2, b"")
-    )
-    assert decode_schedule(Message.parse(encode_field(8, encode_field(2, week)))) == {
-        "Days": [{"Events": [{"Temperature": 2000}, {"Active": True}, {}]}]
-    }
-
-
-@pytest.mark.parametrize(
-    "schedule",
-    [
-        b"\x00",
-        encode_field(2, b"\x00"),
-        encode_field(2, encode_field(1, b"\x00")),
-        encode_field(2, encode_field(1, encode_field(2, b"\x00"))),
-        encode_field(2, encode_field(1, encode_field(2, encode_field(1, b"\x00")))),
-    ],
-)
-def test_decode_schedule_rejects_malformed_schedule(schedule: bytes) -> None:
-    """A schedule with a part that is not a message is an error."""
-    with pytest.raises(ValueError, match="protobuf"):
-        decode_schedule(Message.parse(encode_field(8, schedule)))
 
 
 def test_dates_as_the_cloud_writes_them() -> None:
@@ -821,6 +724,113 @@ def test_changed_state_comfort_from_a_command_of_the_cloud() -> None:
         "FrostProtectionTemperature": 500,
     }
     assert _other_fields(changed, 1, 2, 3) == _other_fields(MANUAL_STATE, 1, 2, 3)
+
+
+def test_merged_state_lays_a_report_over_a_command() -> None:
+    """What a thermostat reports replaces that value, and nothing beside it."""
+    end = local_in(60, 3600, MANUAL_MOMENT)
+    command_state = changed_state(
+        MANUAL_STATE,
+        REGULATION_COMFORT,
+        2450,
+        end=end,
+        vacation=Vacation(enabled=True, begin=date(2026, 12, 20), end=date(2027, 1, 3)),
+    )
+    # At the wall: manual at 22.00 degrees, and the vacation switched off.
+    reported = (
+        encode_field(2, REGULATION_MANUAL)
+        + encode_field(4, encode_field(1, 4400))
+        + encode_field(5, encode_field(1, 0))
+        + encode_field(8, 0)
+    )
+
+    merged = merged_state(command_state, reported)
+
+    assert _decoded(merged) == {
+        **_decoded(command_state),
+        "RegulationMode": REGULATION_MANUAL,
+        "ManualModeSetpoint": 2200,
+        "VacationEnabled": False,
+    }
+    # The comfort hold keeps its end and the vacation its days; a value this
+    # library does not interpret is taken over as well.
+    assert _content(merged, 3) == _content(command_state, 3)
+    assert _decoded(merged)["VacationBeginDay"] == "2026-12-20T00:00:00"
+    assert Message.parse(merged).varint(8) == 0
+    assert _other_fields(merged, 2, 4, 5, 8) == _other_fields(command_state, 2, 4, 5, 8)
+
+
+def test_merged_state_keeps_what_it_cannot_take_over() -> None:
+    """A part in another shape, or a fixed-width value, leaves the state alone."""
+    # A manual part that is a number, a fixed-width value, and a manual part
+    # that holds a fixed-width value.
+    fixed = bytes([8 << 3 | 5, 1, 2, 3, 4])
+    odd = encode_field(4, 7) + fixed + encode_field(3, bytes([2 << 3 | 5, 1, 2, 3, 4]))
+
+    assert merged_state(MANUAL_STATE, odd) == MANUAL_STATE
+
+    with pytest.raises(ValueError):  # noqa: PT011 - any malformed part
+        merged_state(MANUAL_STATE, encode_field(4, b"\x08"))
+
+
+def test_completed_state_adds_what_a_command_leaves_out() -> None:
+    """What a command holds stays as it is; the rest comes from what is known."""
+    # Manual at 22 degrees, a comfort hold without its end, no vacation, and
+    # what this library cannot set: a value that occurs twice and a
+    # fixed-width one.
+    fixed = bytes([10 << 3 | 5, 1, 2, 3, 4])
+    partial = (
+        encode_field(2, REGULATION_MANUAL)
+        + encode_field(3, encode_field(1, 4800))
+        + encode_field(4, encode_field(1, 4400))
+        + encode_field(9, 1)
+        + encode_field(9, 2)
+        + fixed
+    )
+    known = default_state(
+        {
+            "ComfortSetpoint": 2000,
+            "ManualModeSetpoint": 2100,
+            "VacationTemperature": 1200,
+            "FrostProtectionTemperature": 500,
+        }
+    )
+
+    # A fixed-width value among what is known is not taken over.
+    completed = completed_state(partial, known + bytes([11 << 3 | 5, 1, 2, 3, 4]))
+
+    decoded = _decoded(completed)
+    assert decoded["RegulationMode"] == REGULATION_MANUAL
+    assert decoded["ManualModeSetpoint"] == 2200
+    assert decoded["ComfortSetpoint"] == 2400
+    assert decoded["ComfortEndTime"] == NOT_SET
+    assert decoded["VacationEnabled"] is False
+    assert decoded["VacationTemperature"] == 1200
+    assert decoded["FrostProtectionTemperature"] == 500
+    assert 11 not in Message.parse(completed)
+    # Everything the command held is still there, byte for byte.
+    assert _other_fields(completed, 1, 3, 5, 6, 7, 8) == _other_fields(partial, 3)
+    # A state that leaves nothing out stays as it is.
+    assert completed_state(completed, known) == completed
+
+
+def test_completed_state_keeps_what_it_does_not_know() -> None:
+    """A part in another shape, or one that occurs twice, stays as it is."""
+    # A comfort part that is a number, two manual parts, and a frost
+    # protection part that holds a fixed-width value in place of a setpoint.
+    odd = (
+        encode_field(3, 7)
+        + encode_field(4, encode_field(2, 1))
+        + encode_field(4, encode_field(2, 2))
+        + encode_field(7, bytes([1 << 3 | 5, 1, 2, 3, 4]))
+    )
+
+    completed = completed_state(odd, default_state())
+
+    assert _other_fields(completed, 1, 2, 5, 6, 8, 9) == list(Message.parse(odd).fields)
+
+    with pytest.raises(ValueError):  # noqa: PT011 - any malformed part
+        completed_state(encode_field(4, b"\x08"), default_state())
 
 
 def test_changed_state_frost_protection_keeps_its_setpoint() -> None:
@@ -1057,68 +1067,6 @@ def test_command() -> None:
     )
     # It has the shape of the command of OJ's gateway.
     assert command(3, MANUAL_STATE) == MANUAL_COMMAND
-
-
-def test_vacation_mode_of_a_vacation_that_has_begun() -> None:
-    """Observed: the thermostat goes to the vacation mode at once."""
-    today = date(2026, 11, 13)
-    starting = Vacation(enabled=True, begin=date(2026, 11, 13), end=date(2026, 11, 14))
-    ending = Vacation(enabled=True, begin=date(2026, 11, 10), end=date(2026, 11, 13))
-
-    assert vacation_mode(starting, REGULATION_SCHEDULE, today) == REGULATION_VACATION
-    assert vacation_mode(ending, REGULATION_MANUAL, today) == REGULATION_VACATION
-    assert vacation_mode(ending, None, today) == REGULATION_VACATION
-
-
-def test_vacation_mode_of_a_vacation_in_the_future() -> None:
-    """Observed: the mode stays as it is."""
-    today = date(2026, 11, 13)
-    later = Vacation(enabled=True, begin=date(2027, 1, 1), end=date(2027, 1, 3))
-    earlier = Vacation(enabled=True, begin=date(2026, 11, 1), end=date(2026, 11, 12))
-
-    assert vacation_mode(later, REGULATION_SCHEDULE, today) is None
-    assert vacation_mode(earlier, REGULATION_MANUAL, today) is None
-    assert vacation_mode(later, None, today) is None
-
-
-def test_vacation_mode_leaves_the_vacation_mode() -> None:
-    """Assumed: without a vacation that runs, the schedule takes over."""
-    today = date(2026, 11, 13)
-    disabled = Vacation(enabled=False, begin=date(2026, 11, 13), end=date(2026, 11, 14))
-    moved = Vacation(enabled=True, begin=date(2027, 1, 1), end=date(2027, 1, 3))
-    removed = Vacation(enabled=False)
-
-    assert vacation_mode(disabled, REGULATION_VACATION, today) == REGULATION_SCHEDULE
-    assert vacation_mode(moved, REGULATION_VACATION, today) == REGULATION_SCHEDULE
-    assert vacation_mode(removed, REGULATION_VACATION, today) == REGULATION_SCHEDULE
-    assert vacation_mode(removed, REGULATION_MANUAL, today) is None
-
-
-def test_vacation_mode_without_both_days() -> None:
-    """A vacation without its first or last day does not run."""
-    today = date(2026, 11, 13)
-    endless = Vacation(enabled=True, begin=date(2026, 11, 13))
-    sudden = Vacation(enabled=True, end=date(2026, 11, 14))
-
-    assert vacation_mode(endless, REGULATION_SCHEDULE, today) is None
-    assert vacation_mode(sudden, REGULATION_SCHEDULE, today) is None
-    assert vacation_mode(endless, REGULATION_VACATION, today) == REGULATION_SCHEDULE
-
-
-def test_vacation_mode_compares_days() -> None:
-    """Today may be a moment, as local_in() returns it, and so may the days."""
-    # 23:30 UTC on the 12th is already the 13th at the thermostat.
-    today = local_in(0, 3600, datetime(2026, 11, 12, 23, 30, tzinfo=UTC))
-    starting = Vacation(enabled=True, begin=date(2026, 11, 13), end=date(2026, 11, 13))
-    moments = Vacation(
-        enabled=True,
-        begin=datetime(2026, 11, 13, 12, tzinfo=ZONE),
-        end=datetime(2026, 11, 13, 8, tzinfo=ZONE),
-    )
-
-    assert vacation_mode(starting, REGULATION_SCHEDULE, today) == REGULATION_VACATION
-    assert vacation_mode(moments, REGULATION_SCHEDULE, today) == REGULATION_VACATION
-    assert vacation_mode(starting, REGULATION_SCHEDULE, date(2026, 11, 12)) is None
 
 
 def test_describe_logged_messages() -> None:

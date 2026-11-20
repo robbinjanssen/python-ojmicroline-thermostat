@@ -6,18 +6,21 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from .exceptions import (
     OJMicrolineConnectionError,
     OJMicrolineError,
+    OJMicrolineHTTPError,
+    OJMicrolineResultsError,
     OJMicrolineTimeoutError,
     OJMicrolineUnauthorizedError,
 )
 from .gateway import DeviceGateway, GatewayMode
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Mapping
+    from collections.abc import Awaitable, Iterable, Mapping
 
     from .models import Thermostat
     from .ojmicroline import RequestFunc
@@ -26,8 +29,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# How long the cloud API gets to answer when the thermostats are fetched. The
-# thermostats on the gateway do not depend on that answer.
+# How long the cloud API gets to answer when the thermostats are fetched, and
+# when it sets a mode that the gateway can set as well. The thermostats on the
+# gateway do not depend on that answer.
 CLOUD_TIMEOUT = 10.0
 
 # The JSON of each thermostat as the cloud API returns it, by serial number.
@@ -35,9 +39,33 @@ Snapshot = dict[str, dict[str, Any]]
 # Called with a new snapshot, for the caller to store.
 SnapshotListener = Callable[[Snapshot], None]
 
+# The fields of the thermostat JSON that change by themselves in every series.
+# A snapshot that only differs in those is not worth storing again.
+VOLATILE_FIELDS = frozenset({"Heating", "Online"})
+
 _T = TypeVar("_T")
 _CloudT = TypeVar("_CloudT", bound="WD5API | WG4API")
-_GatewayT = TypeVar("_GatewayT", bound=DeviceGateway)
+_GatewayT = TypeVar("_GatewayT", bound=DeviceGateway[Any])
+
+
+# The HTTP statuses below 500 that tell of a cloud API that cannot be used
+# right now, not of a request it turned down.
+_NOT_NOW = frozenset({HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS})
+
+
+def cloud_unreachable(error: OJMicrolineError) -> bool:
+    """Tell a cloud API that cannot be used from one that refused a request.
+
+    Only ask this for an error of the cloud API. A thermostat on the gateway
+    that does not answer raises the same connection and timeout errors, which
+    say nothing about the cloud.
+    """
+    if isinstance(error, OJMicrolineHTTPError):
+        # Out of order (5xx) or busy, not a request it turned down (4xx).
+        return error.status >= HTTPStatus.INTERNAL_SERVER_ERROR or (
+            error.status in _NOT_NOW
+        )
+    return isinstance(error, OJMicrolineConnectionError | OJMicrolineTimeoutError)
 
 
 class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
@@ -60,6 +88,8 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
     supports_notifications: bool = True
     # The regulation modes the gateway can set by itself.
     local_modes: tuple[int, ...] = ()
+    # The fields of the thermostat JSON that change by themselves.
+    volatile_fields: frozenset[str] = VOLATILE_FIELDS
     # Whether a mode for a relayed thermostat goes through the cloud first.
     # The cloud of the WD5 series keeps the mode of a group and does not take
     # over what the thermostat reports, so a mode the gateway set alone would
@@ -73,6 +103,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         *,
         snapshot: Mapping[str, Mapping[str, Any]] | None = None,
         on_snapshot: SnapshotListener | None = None,
+        known: Iterable[str] = (),
     ) -> None:
         """Create a new instance of the API object.
 
@@ -81,7 +112,13 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
             cloud: The cloud API of the account the thermostats belong to.
             gateway: The gateway the thermostats connect to.
             snapshot: The snapshot that was stored last, if any.
-            on_snapshot: Called with every new snapshot, to store it.
+            on_snapshot: Called with a new snapshot, to store it. It is not
+                called for one that only differs in what changes by itself,
+                such as a measured temperature.
+            known: The serial numbers of the thermostats that connected to
+                the gateway before, see the property known. Without them, a
+                thermostat that only the gateway reaches is taken for one
+                that the cloud reaches, until it connects again.
 
         """
         self.cloud = cloud
@@ -96,6 +133,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         }
         # What each thermostat on the gateway reported, in cloud API fields.
         self._live: dict[str, dict[str, Any]] = {}
+        self._known = set(known)
         self._changed: set[str] = set()
         self._wake = asyncio.Event()
         # The task that waits for notifications. Another task is a new
@@ -143,6 +181,22 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         await self._refresh()
         return [self._thermostat(serial) for serial in self._snapshot]
 
+    async def refresh(self) -> None:
+        """Fetch what the cloud API knows of the thermostats right now.
+
+        Call this before changing something that the cloud replaces as a
+        whole, such as the settings of a group: cloud_thermostat() is as
+        recent as the last fetch.
+
+        Raises
+        ------
+            OJMicrolineError: The cloud API failed.
+
+        """
+        await self._refresh()
+        if self.cloud_error is not None:
+            raise self.cloud_error
+
     async def get_energy_usage(self, resource: Thermostat) -> list[float]:
         """Get the energy usage of a thermostat from the cloud API.
 
@@ -167,6 +221,8 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         regulation_mode: int,
         temperature: int | None,
         duration: int,
+        *,
+        through_cloud: Callable[[], Awaitable[object]] | None = None,
     ) -> bool:
         """Set the regulation mode of a thermostat.
 
@@ -177,7 +233,9 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         API; see can_set().
 
         When cloud_first sends a local mode through the cloud API and that API
-        cannot be reached, the gateway sets the mode itself.
+        cannot be reached, the gateway sets the mode itself. The cloud gets
+        CLOUD_TIMEOUT seconds then. A request the cloud API refuses (HTTP 4xx)
+        is an error: the gateway does not overrule it.
 
         Args:
         ----
@@ -185,6 +243,11 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
             regulation_mode: The mode to set the thermostat to.
             temperature: The temperature to set or None.
             duration: The duration in minutes (comfort mode only).
+            through_cloud: Sets the mode in the cloud in the caller's own way,
+                where this API decides to go through the cloud; the cloud
+                API's set_regulation_mode() when omitted. A caller that sets
+                more than the mode with it, such as a whole group, passes it
+                so the choice between cloud and gateway stays here.
 
         Returns:
         -------
@@ -206,21 +269,36 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
                 "not connected to."
             )
             raise OJMicrolineError(msg)
-        try:
+
+        async def in_the_cloud() -> bool:
+            if through_cloud is not None:
+                await through_cloud()
+                return True
             return await self._cloud(
                 lambda: self.cloud.set_regulation_mode(
                     resource, regulation_mode, temperature, duration
                 )
             )
-        except (OJMicrolineConnectionError, OJMicrolineTimeoutError):
-            if not (self.on_gateway(serial) and regulation_mode in self.local_modes):
+
+        if not (self.on_gateway(serial) and regulation_mode in self.local_modes):
+            # Only the cloud can do this.
+            return await in_the_cloud()
+        reason = "did not answer in time"
+        try:
+            # The gateway can take over, so the cloud does not get long.
+            async with asyncio.timeout(CLOUD_TIMEOUT):
+                return await in_the_cloud()
+        except TimeoutError:
+            pass
+        except OJMicrolineError as error:
+            if not cloud_unreachable(error):
                 raise
-            _LOGGER.debug(
-                "The cloud API cannot be reached; the gateway sets thermostat %s",
-                serial,
-            )
-            await self.set_on_gateway(resource, regulation_mode, temperature, duration)
-            return True
+            reason = "cannot be reached"
+        _LOGGER.debug(
+            "The cloud API %s; the gateway sets thermostat %s", reason, serial
+        )
+        await self.set_on_gateway(resource, regulation_mode, temperature, duration)
+        return True
 
     async def set_on_gateway(
         self,
@@ -307,6 +385,16 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
             return True
         return self._gateway.mode is GatewayMode.LOCAL and self._known_locally(serial)
 
+    @property
+    def known(self) -> frozenset[str]:
+        """Return the serial numbers of the thermostats the gateway served.
+
+        Store them, and pass them in again after a restart: in local mode a
+        thermostat that connected before does not reach the cloud, also while
+        it has not connected again yet.
+        """
+        return frozenset(self._known)
+
     def cloud_reaches(self, serial: str) -> bool:
         """Tell whether a change through the cloud API reaches a thermostat.
 
@@ -360,12 +448,13 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
 
     def _known_locally(self, serial: str) -> bool:
         """Tell whether a thermostat was served by the gateway before."""
-        return serial in self._live
+        return serial in self._known
 
     # --- What the series share --------------------------------------------------
 
     def _on_state(self, serial: str, fields: dict[str, Any]) -> None:
         """Keep what a thermostat on the gateway reports."""
+        self._known.add(serial)
         self._live.setdefault(serial, {}).update(fields)
         self._changed.add(serial)
         self._wake.set()
@@ -393,6 +482,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
                 except OJMicrolineUnauthorizedError:
                     # The session expired; _cloud() logs in anew.
                     snapshot = await self._cloud(self.cloud.get_thermostats_json)
+            self._check(snapshot)
         except TimeoutError as error:
             msg = "The cloud API did not answer in time."
             self.cloud_error = OJMicrolineTimeoutError(msg)
@@ -407,17 +497,55 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
             # An empty answer is more likely a hiccup of the cloud than an
             # account without thermostats; it must not lock them out.
             if snapshot and snapshot != self._snapshot:
+                stored = self._lasting(self._snapshot)
                 self._snapshot = snapshot
                 self._gateway.allowed_serials = set(snapshot)
-                if self._on_snapshot is not None:
-                    self._on_snapshot(
-                        {serial: dict(data) for serial, data in snapshot.items()}
-                    )
+                # A measured temperature alone is not worth storing again.
+                if self._lasting(snapshot) != stored:
+                    self._store_snapshot()
         if self.cloud_error is not None:
             _LOGGER.debug(
                 "Using the stored thermostats, the cloud API failed: %s",
                 self.cloud_error,
             )
+
+    def _check(self, snapshot: Snapshot) -> None:
+        """Refuse a snapshot that holds a thermostat that cannot be read.
+
+        It would replace the stored one, which works, for good.
+
+        Raises
+        ------
+            OJMicrolineResultsError: A thermostat is not what the API is
+                known to return.
+
+        """
+        try:
+            for data in snapshot.values():
+                self._parse(dict(data))
+        except (AttributeError, KeyError, TypeError, ValueError) as error:
+            # The answer itself stays out of the error: it may hold the email
+            # address of the account, and an error ends up in logs.
+            msg = "The API returned a thermostat in a form that is not understood."
+            raise OJMicrolineResultsError(msg) from error
+
+    def _store_snapshot(self) -> None:
+        """Hand the snapshot to the caller, to store it."""
+        if self._on_snapshot is not None:
+            self._on_snapshot(
+                {serial: dict(data) for serial, data in self._snapshot.items()}
+            )
+
+    def _lasting(self, snapshot: Snapshot) -> Snapshot:
+        """Return a snapshot without the fields that change by themselves."""
+        return {
+            serial: {
+                name: value
+                for name, value in data.items()
+                if name not in self.volatile_fields
+            }
+            for serial, data in snapshot.items()
+        }
 
     async def _cloud(self, call: Callable[[], Awaitable[_T]]) -> _T:
         """Log in to the cloud API and call it.

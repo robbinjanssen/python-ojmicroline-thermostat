@@ -262,14 +262,19 @@ async def test_command_avoids_a_number_that_is_waiting_for_an_answer(
 async def test_change_in_the_app_reaches_the_thermostat(
     gateway: WG4Gateway, cloud: FakeCloud, events: Events, connect: Callable[[], Any]
 ) -> None:
-    """A command of OJ's gateway is passed on, and reported as the new state."""
+    """A command of OJ's gateway is passed on, and reported once it is accepted."""
     thermostat = await _relayed(connect)
+    answered = len(cloud.received)
 
     # The app puts the thermostat on its schedule.
     from_the_app = command(7, changed_state(STATE, 1), SCHEDULE)
     await cloud.send(from_the_app)
     assert await thermostat.receive_frame() == encode_frame(from_the_app)
+    # Nothing has changed until the thermostat takes the command over.
+    assert events[-1][1].get("RegulationMode") != 1
+    await thermostat.send(acknowledgement(7))
     await until(lambda: events[-1][1].get("RegulationMode") == 1)
+    await until(lambda: len(cloud.received) == answered + 1)
 
     # The next command of the gateway starts from that state.
     task = asyncio.create_task(gateway.set_mode(SERIAL, 3))
@@ -282,16 +287,121 @@ async def test_change_in_the_app_reaches_the_thermostat(
     await task
 
 
+async def test_commands_count_in_the_order_they_are_acknowledged(
+    gateway: WG4Gateway, cloud: FakeCloud, events: Events, connect: Callable[[], Any]
+) -> None:
+    """A change in the app that follows a command of the gateway has the last word.
+
+    The thermostat answers in the order it received, which is the order in
+    which it took the states over.
+    """
+    thermostat = await _relayed(connect)
+
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 3, 2250))
+    assert (await thermostat.receive()).varint(1) == 101
+    # Before the thermostat answers, the app puts it on its schedule.
+    from_the_app = command(7, changed_state(STATE, 1), SCHEDULE)
+    await cloud.send(from_the_app)
+    assert await thermostat.receive_frame() == encode_frame(from_the_app)
+
+    await thermostat.send(acknowledgement(101))
+    await task
+    assert events[-1][1]["RegulationMode"] == 3
+    await thermostat.send(acknowledgement(7))
+    await until(lambda: events[-1][1].get("RegulationMode") == 1)
+
+    # The next command starts from the state of the app, not from the
+    # gateway's own command.
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 3))
+    sent = await thermostat.receive()
+    state = sent.message(9)
+    assert state is not None
+    assert state.message(5) == Message.parse(encode_field(1, 4444))
+    await thermostat.send(acknowledgement(102))
+    await task
+
+
+async def test_command_starts_from_what_ojs_gateway_has_under_way(
+    gateway: WG4Gateway, cloud: FakeCloud, events: Events, connect: Callable[[], Any]
+) -> None:
+    """A command does not undo a change of the app that is still on its way.
+
+    The thermostat takes the state of the app over first and the command of
+    the gateway, a complete state, right after it.
+    """
+    thermostat = await _relayed(connect)
+
+    # The app sets another permanent hold, which the thermostat has not
+    # answered yet when the gateway puts it on its schedule.
+    await cloud.send(command(7, changed_state(STATE, 3, 2500), SCHEDULE))
+    await thermostat.receive_frame()
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 1))
+    sent = await thermostat.receive()
+    state = sent.message(9)
+    assert state is not None
+    assert state.varint(2) == 1
+    assert state.message(5) == Message.parse(encode_field(1, 5000))
+
+    await thermostat.send(acknowledgement(7))
+    await thermostat.send(acknowledgement(101))
+    await task
+    assert events[-1][1]["RegulationMode"] == 1
+    assert events[-1][1]["ManualTemperature"] == 2500
+
+
+async def test_change_of_ojs_gateway_without_an_answer_does_not_stay_under_way(
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A change the thermostat never confirmed counts as lost after a while."""
+    thermostat = await _relayed(connect)
+    await cloud.send(command(7, changed_state(STATE, 3, 2500), SCHEDULE))
+    await thermostat.receive_frame()
+
+    monkeypatch.setattr(gateway_server, "LATE_ACKNOWLEDGE_TIMEOUT", 0)
+    task = asyncio.create_task(gateway.set_mode(SERIAL, 1))
+    state = (await thermostat.receive()).message(9)
+    assert state is not None
+    assert state.message(5) == Message.parse(encode_field(1, 4444))
+    await thermostat.send(acknowledgement(101))
+    await task
+
+
+async def test_refused_command_of_ojs_gateway_changes_nothing(
+    cloud: FakeCloud, events: Events, connect: Callable[[], Any]
+) -> None:
+    """A state the thermostat did not take over is not reported."""
+    thermostat = await _relayed(connect)
+    seen = len(events)
+
+    from_the_app = command(7, changed_state(STATE, 1), SCHEDULE)
+    await cloud.send(from_the_app)
+    await thermostat.receive_frame()
+    answered = len(cloud.received)
+    await thermostat.send(acknowledgement(7, accepted=0))
+    await until(lambda: len(cloud.received) == answered + 1)
+    assert len(events) == seen
+
+
 async def test_relay_passes_on_what_it_does_not_understand(
-    gateway: WG4Gateway, cloud: FakeCloud, connect: Callable[[], Any]
+    gateway: WG4Gateway, cloud: FakeCloud, events: Events, connect: Callable[[], Any]
 ) -> None:
     """A message of OJ's gateway reaches the thermostat whatever is in it."""
     thermostat = await _relayed(connect)
+    reported = len(events)
 
     # Not a message at all, and a command whose state is not a message.
     for message in (b"\x00", encode_field(1, 5) + encode_field(9, b"\x00")):
         await cloud.send(message)
         assert await thermostat.receive_frame() == encode_frame(message)
+    assert "\n".join(gateway.history).count("that is not understood") == 2
+    # Accepting such a command teaches the gateway nothing either.
+    answered = len(cloud.received)
+    await thermostat.send(acknowledgement(5))
+    await until(lambda: len(cloud.received) == answered + 1)
+    assert len(events) == reported
 
     # The relay goes on, and a command still starts from the last good state.
     task = asyncio.create_task(gateway.set_mode(SERIAL, 1))
@@ -376,6 +486,48 @@ async def test_relay_passes_on_what_the_thermostat_says_unknowingly(
     assert state.message(5) == Message.parse(encode_field(1, 4444))
     await thermostat.send(acknowledgement(101))
     await task
+    assert gateway.is_relayed(SERIAL)
+
+
+async def test_relay_survives_fields_it_reads_differently(
+    gateway: WG4Gateway, cloud: FakeCloud, connect: Callable[[], Any]
+) -> None:
+    """A message that another firmware fills differently is passed on.
+
+    Neither a field 6 that is no login, nor an end no calendar holds, may end
+    the relay: describing a message for the log must not close a connection.
+    """
+    thermostat = await _relayed(connect)
+    passed_on = len(cloud.received)
+
+    no_login = encode_field(1, 50) + encode_field(5, 1) + encode_field(6, b"\x00")
+    endless = encode_field(4, encode_field(1, 3332) + encode_field(2, 2**64 - 1))
+    hold = encode_field(1, 51) + encode_field(5, 1) + encode_field(9, endless)
+    for message in (no_login, hold):
+        await thermostat.send(message)
+    await until(lambda: len(cloud.received) == passed_on + 2)
+    assert cloud.received[-2:] == [Message.parse(no_login), Message.parse(hold)]
+    assert f"until={2**64 - 1}" in "\n".join(gateway.history)
+    assert gateway.is_relayed(SERIAL)
+
+
+async def test_log_line_never_ends_a_connection(
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A message that cannot be described is named by its fields."""
+    thermostat = await _relayed(connect)
+    passed_on = len(cloud.received)
+
+    def broken(_message: Message) -> str:
+        raise OverflowError
+
+    monkeypatch.setattr(gateway, "_describe", broken)
+    await thermostat.send(TELEMETRY)
+    await until(lambda: len(cloud.received) == passed_on + 1)
+    assert "(cannot be described)" in "\n".join(gateway.history)
     assert gateway.is_relayed(SERIAL)
 
 
@@ -621,6 +773,138 @@ async def test_gateway_that_does_not_answer_counts_as_unreachable(
         release.set()
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.parametrize("behaviour", ["silent", "hangs_up_at_login"])
+async def test_ojs_gateway_that_takes_no_login_counts_as_unreachable(  # noqa: PLR0913, PLR0917 # pylint: disable=too-many-arguments
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    statuses: list[UpstreamStatus],
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+    behaviour: str,
+) -> None:
+    """A gateway that connects but does not answer the login is no use.
+
+    The thermostat is answered locally, at once and on its next connection,
+    instead of being relayed to it again and again.
+    """
+    monkeypatch.setattr(gateway_server, "UPSTREAM_TIMEOUT", 0.2)
+    setattr(cloud, behaviour, True)
+    gateway.profiles[SERIAL] = PROFILE
+
+    thermostat: FakeThermostat = await connect()
+    assert (await thermostat.login()).varint(3) == 1
+    assert await thermostat.upload() == FROM_THE_PROFILE
+    assert not gateway.is_relayed(SERIAL)
+    assert statuses == [UpstreamStatus.UNREACHABLE]
+    assert "did not answer the login of thermostat" in "\n".join(gateway.history)
+
+    # The next connection does not wait for it again.
+    again: FakeThermostat = await connect()
+    assert (await again.login()).varint(3) == 1
+    assert cloud.connections == 1
+
+
+async def test_ignored_login_says_nothing_about_other_thermostats(
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OJ's gateway is still tried for a thermostat it did not let down."""
+    monkeypatch.setattr(gateway_server, "UPSTREAM_TIMEOUT", 0.2)
+    other = "7654321"
+    gateway.allowed_serials = {SERIAL, other}
+    gateway.profiles[SERIAL] = gateway.profiles[other] = PROFILE
+
+    cloud.hangs_up_at_login = True
+    ignored: FakeThermostat = await connect()
+    assert (await ignored.login()).varint(3) == 1
+    assert not gateway.is_relayed(SERIAL)
+
+    cloud.hangs_up_at_login = False
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login(other)
+    assert gateway.is_relayed(other)
+    assert gateway.upstream_status is UpstreamStatus.CONNECTED
+
+
+async def test_silent_ojs_gateway_does_not_make_a_thermostat_connect_again(
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a gateway that answers the login is worth connecting again for.
+
+    A thermostat cannot be reached while it connects again, so one that
+    would only be answered locally once more is left alone.
+    """
+    monkeypatch.setattr(gateway_server, "UPSTREAM_TIMEOUT", 0.05)
+    monkeypatch.setattr(gateway_server, "UPSTREAM_RETRY_INTERVAL", 0.05)
+    gateway.profiles[SERIAL] = PROFILE
+    cloud.silent = True
+
+    thermostat: FakeThermostat = await connect()
+    assert (await thermostat.login()).varint(3) == 1
+    # OJ's gateway takes the connection every time, and never answers.
+    await until(lambda: cloud.connections >= 3)
+    assert gateway.connected == {SERIAL}
+    assert not gateway.is_relayed(SERIAL)
+
+    cloud.silent = False
+    assert await thermostat.was_closed()
+    again: FakeThermostat = await connect()
+    await again.login()
+    assert gateway.is_relayed(SERIAL)
+
+
+async def test_stopping_during_a_login_hangs_up_on_ojs_gateway(
+    gateway: WG4Gateway, cloud: FakeCloud, connect: Callable[[], Any]
+) -> None:
+    """A gateway that stops before OJ's gateway answered leaves nothing open."""
+    cloud.silent = True
+    thermostat: FakeThermostat = await connect()
+    await thermostat.send(login())
+    await until(lambda: len(cloud.received) == 1)
+
+    await gateway.stop()
+    await until(lambda: cloud.hung_up == 1)
+
+
+async def test_ojs_gateway_that_takes_no_login_is_the_only_way_without_a_profile(
+    gateway: WG4Gateway,
+    cloud: FakeCloud,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a profile the thermostat cannot be answered here either."""
+    monkeypatch.setattr(gateway_server, "UPSTREAM_TIMEOUT", 0.05)
+    cloud.silent = True
+
+    for attempts in (1, 2):
+        thermostat: FakeThermostat = await connect()
+        await thermostat.send(login())
+        assert await thermostat.was_closed()
+        assert cloud.connections == attempts
+    assert not gateway.connected
+
+
+async def test_network_error_is_a_closed_connection(
+    gateway: WG4Gateway,
+    connect: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A network that goes away closes the connection without a traceback."""
+
+    async def unreachable(_reader: asyncio.StreamReader) -> tuple[str, bytes]:
+        raise OSError(101, "Network is unreachable")
+
+    monkeypatch.setattr(gateway, "_read_login", unreachable)
+    thermostat: FakeThermostat = await connect()
+    assert await thermostat.was_closed()
+    assert "was closed: OSError(101, 'Network is unreachable')" in gateway.history[-1]
 
 
 async def test_thermostat_is_relayed_again_when_ojs_gateway_is_back(

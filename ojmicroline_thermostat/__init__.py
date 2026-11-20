@@ -4,6 +4,7 @@ from .exceptions import (
     OJMicrolineAuthError,
     OJMicrolineConnectionError,
     OJMicrolineError,
+    OJMicrolineHTTPError,
     OJMicrolineResultsError,
     OJMicrolineTimeoutError,
     OJMicrolineUnauthorizedError,
@@ -22,6 +23,7 @@ from .gateway import (
     WG4Gateway,
     server_ssl_context,
 )
+from .local import cloud_unreachable
 from .models import Thermostat
 from .ojmicroline import OJMicroline
 from .wd5 import WD5API
@@ -46,6 +48,7 @@ __all__ = [
     "OJMicrolineAuthError",
     "OJMicrolineConnectionError",
     "OJMicrolineError",
+    "OJMicrolineHTTPError",
     "OJMicrolineResultsError",
     "OJMicrolineTimeoutError",
     "OJMicrolineUnauthorizedError",
@@ -55,5 +58,6 @@ __all__ = [
     "WD5LocalAPI",
     "WG4Gateway",
     "WG4LocalAPI",
+    "cloud_unreachable",
     "server_ssl_context",
 ]

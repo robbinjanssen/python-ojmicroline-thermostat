@@ -6,7 +6,7 @@ from typing import Any
 
 from .const import REGULATION_MANUAL, REGULATION_SCHEDULE
 from .gateway import WG4Gateway
-from .local import LocalAPI
+from .local import VOLATILE_FIELDS, LocalAPI
 from .models import Thermostat
 from .wg4 import WG4API
 
@@ -33,6 +33,41 @@ class WG4LocalAPI(LocalAPI[WG4API, WG4Gateway]):
     """
 
     local_modes = LOCAL_MODES
+    volatile_fields = VOLATILE_FIELDS | {
+        "LoadMeasuredWatt",
+        "SetPointTemp",
+        "Temperature",
+    }
+
+    async def set_energy_price(self, resource: Thermostat, price: float) -> bool:
+        """Set the price per kWh through the cloud API, and remember it.
+
+        Without remembering it, the next report of the thermostat would show
+        the old price until the cloud is asked again.
+
+        Args:
+        ----
+            resource: The Thermostat model.
+            price: The price per kWh, see WG4API.set_energy_price().
+
+        Returns:
+        -------
+            True if it succeeded.
+
+        Raises:
+        ------
+            OJMicrolineError: The cloud refused the price.
+
+        """
+        done = await self._cloud(lambda: self.cloud.set_energy_price(resource, price))
+        # A thermostat that is not in the snapshot has nothing to remember.
+        data = self._snapshot.get(resource.serial_number)
+        charge = round(price, 2)
+        if data is not None and data.get("KwhCharge") != charge:
+            data["KwhCharge"] = charge
+            # The stored snapshot would bring the old price back otherwise.
+            self._store_snapshot()
+        return done
 
     def _known_locally(self, serial: str) -> bool:
         # A thermostat with a profile was relayed, and can be answered.

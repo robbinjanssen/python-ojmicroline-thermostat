@@ -55,7 +55,7 @@ async def cloud_fixture(
 
 @pytest.fixture(name="connect")
 async def connect_fixture(
-    gateway: DeviceGateway,
+    gateway: DeviceGateway[Any],
 ) -> AsyncIterator[Callable[[], Any]]:
     """Connect fake thermostats to the gateway of a test, and hang up after it."""
     thermostats: list[FakeThermostat] = []

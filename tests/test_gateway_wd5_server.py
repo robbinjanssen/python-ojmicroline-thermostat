@@ -16,6 +16,7 @@ import pytest
 from ojmicroline_thermostat import OJMicrolineConnectionError
 from ojmicroline_thermostat.const import (
     REGULATION_COMFORT,
+    REGULATION_ECO,
     REGULATION_MANUAL,
     REGULATION_SCHEDULE,
 )
@@ -35,6 +36,7 @@ from ojmicroline_thermostat.gateway.wd5 import (
     command,
     decode_state,
     default_state,
+    upload_request,
 )
 
 from .gateway_fakes import Events, FakeCloud, FakeThermostat, acknowledgement, until
@@ -284,6 +286,49 @@ async def test_first_command_is_built_from_what_is_known(
     await task
 
 
+async def test_change_at_the_thermostat_survives_the_next_command(
+    gateway: WD5Gateway, connect: Callable[[], Any]
+) -> None:
+    """What was set at the wall is not undone by a command that follows.
+
+    A command is a complete state, built from the last one the thermostat
+    took over. The thermostat only reports the part that matters in its mode,
+    which is laid over that state.
+    """
+    thermostat = await _uploaded(connect)
+    task = asyncio.create_task(
+        gateway.set_mode(SERIAL, REGULATION_MANUAL, 2000, known=KNOWN)
+    )
+    await thermostat.receive()
+    await thermostat.send(acknowledgement(101))
+    await task
+
+    # Someone turns the thermostat up at the wall.
+    at_the_wall = (
+        encode_field(1, 9)
+        + encode_field(4, 1)
+        + encode_field(
+            9,
+            encode_field(1, 847837999)
+            + encode_field(2, REGULATION_MANUAL)
+            + encode_field(4, encode_field(1, 4600)),
+        )
+    )
+    await thermostat.send(at_the_wall)
+    await thermostat.receive()
+
+    task = asyncio.create_task(gateway.set_mode(SERIAL, REGULATION_ECO))
+    sent = await thermostat.receive()
+    state = sent.data(9)
+    assert state is not None
+    assert _reported(state)["RegulationMode"] == REGULATION_ECO
+    assert _reported(state)["ManualModeSetpoint"] == 2300
+    # What the thermostat did not report is still what the cloud knows.
+    assert _reported(state)["VacationBeginDay"] == "2026-12-20T00:00:00"
+    await thermostat.send(acknowledgement(102))
+    await task
+
+
 async def test_set_mode_when_the_thermostat_disconnects(
     gateway: WD5Gateway, connect: Callable[[], Any]
 ) -> None:
@@ -375,16 +420,26 @@ async def test_relayed_session(
         assert [message.varint(1) for message in cloud.received] == [1, 2, 3]
         assert events[-1][1]["ManualModeSetpoint"] == 2150
 
-        # A change in the vendor's app is a complete state. It is reported,
-        # and its answer goes back to OJ's gateway.
+        # The request for the full upload changes nothing once it is accepted.
+        seen = len(events)
+        await cloud.send(upload_request())
+        await thermostat.receive_frame()
+        await thermostat.send(acknowledgement(0))
+        await until(lambda: len(cloud.received) == 4)
+        assert len(events) == seen
+
+        # A change in the vendor's app is a complete state. It is reported
+        # once the thermostat accepted it, and its answer goes back to OJ's
+        # gateway.
         from_the_app = command(
             7, changed_state(default_state(KNOWN), REGULATION_MANUAL, 2300)
         )
         await cloud.send(from_the_app)
         assert await thermostat.receive_frame() == encode_frame(from_the_app)
-        await until(lambda: events[-1][1].get("ManualModeSetpoint") == 2300)
+        assert events[-1][1].get("ManualModeSetpoint") != 2300
         await thermostat.send(acknowledgement(7))
-        await until(lambda: len(cloud.received) == 4)
+        await until(lambda: events[-1][1].get("ManualModeSetpoint") == 2300)
+        await until(lambda: len(cloud.received) == 5)
 
         # The next command of the gateway starts from that state, and OJ's
         # gateway sees neither the command nor its answer.
@@ -397,13 +452,97 @@ async def test_relayed_session(
         assert _reported(state)["ComfortSetpoint"] == 2000
         await thermostat.send(acknowledgement(101))
         await task
-        assert len(cloud.received) == 4
+        assert len(cloud.received) == 5
+    finally:
+        await thermostat.close()
+
+
+async def test_command_of_ojs_gateway_that_leaves_parts_out_is_completed(
+    relay: WD5Gateway, cloud: FakeCloud, events: Events
+) -> None:
+    """A command of the gateway holds every part, whatever OJ's gateway sent.
+
+    Logged commands of OJ's gateway differ in what they hold. The thermostat
+    takes a command over as a whole, so what a command of OJ's gateway left
+    out comes from what is known.
+    """
+    thermostat = await FakeThermostat.connect(relay.port)
+    try:
+        await thermostat.send(login())
+        await thermostat.receive()
+        for message in (INFO, STATE):
+            await thermostat.send(message)
+            await thermostat.receive()
+
+        partial = encode_field(2, REGULATION_MANUAL) + encode_field(
+            4, encode_field(1, 4400)
+        )
+        await cloud.send(command(7, partial))
+        await thermostat.receive_frame()
+        await thermostat.send(acknowledgement(7))
+        await until(lambda: events[-1][1].get("ManualModeSetpoint") == 2200)
+
+        task = asyncio.create_task(
+            relay.set_mode(SERIAL, REGULATION_SCHEDULE, known=KNOWN)
+        )
+        sent = await thermostat.receive()
+        state = sent.data(9)
+        assert state is not None
+        assert _reported(state) == {
+            "RegulationMode": REGULATION_SCHEDULE,
+            "ComfortSetpoint": 2000,
+            "ComfortEndTime": "1970-01-01T00:00:00",
+            "ManualModeSetpoint": 2200,
+            "VacationEnabled": True,
+            "VacationBeginDay": "2026-12-20T00:00:00",
+            "VacationEndDay": "2027-01-03T00:00:00",
+            "VacationTemperature": 1200,
+            "BoostEndTime": "1970-01-01T00:00:00",
+            "FrostProtectionTemperature": 500,
+        }
+        await thermostat.send(acknowledgement(101))
+        await task
+    finally:
+        await thermostat.close()
+
+
+async def test_command_starts_from_what_ojs_gateway_has_under_way(
+    relay: WD5Gateway, cloud: FakeCloud, events: Events
+) -> None:
+    """A command does not undo a change of the app that is still on its way."""
+    thermostat = await FakeThermostat.connect(relay.port)
+    try:
+        await thermostat.send(login())
+        await thermostat.receive()
+        for message in (INFO, STATE):
+            await thermostat.send(message)
+            await thermostat.receive()
+
+        # The app sets a manual temperature, which the thermostat has not
+        # answered yet when the gateway puts it on its schedule.
+        from_the_app = changed_state(default_state(KNOWN), REGULATION_MANUAL, 2300)
+        await cloud.send(command(7, from_the_app))
+        await thermostat.receive_frame()
+        task = asyncio.create_task(
+            relay.set_mode(SERIAL, REGULATION_SCHEDULE, known=KNOWN)
+        )
+        sent = await thermostat.receive()
+        state = sent.data(9)
+        assert state is not None
+        assert _reported(state)["RegulationMode"] == REGULATION_SCHEDULE
+        assert _reported(state)["ManualModeSetpoint"] == 2300
+
+        await thermostat.send(acknowledgement(7))
+        await thermostat.send(acknowledgement(sent.varint(1) or 0))
+        await task
+        assert events[-1][1]["RegulationMode"] == REGULATION_SCHEDULE
+        assert events[-1][1]["ManualModeSetpoint"] == 2300
     finally:
         await thermostat.close()
 
 
 async def test_malformed_state_of_ojs_gateway_is_not_a_base(
-    relay: WD5Gateway, cloud: FakeCloud
+    relay: WD5Gateway, cloud: FakeCloud, events: Events
 ) -> None:
     """A command that cannot be decoded is passed on, and nothing more."""
     thermostat = await FakeThermostat.connect(relay.port)
@@ -413,10 +552,16 @@ async def test_malformed_state_of_ojs_gateway_is_not_a_base(
         await thermostat.send(STATE)
         await thermostat.receive()
 
+        reported = len(events)
         odd = encode_field(1, 8) + encode_field(4, 1) + encode_field(9, b"\x00")
         await cloud.send(odd)
         assert await thermostat.receive_frame() == encode_frame(odd)
         await until(lambda: "not understood" in relay.history[-1])
+        # Accepting it teaches the gateway nothing either.
+        answered = len(cloud.received)
+        await thermostat.send(acknowledgement(8))
+        await until(lambda: len(cloud.received) == answered + 1)
+        assert len(events) == reported
 
         # The next command starts from what the thermostat reported.
         task = asyncio.create_task(relay.set_mode(SERIAL, REGULATION_MANUAL))
