@@ -61,7 +61,8 @@ class WD5LocalAPI(LocalAPI[WD5API, WD5Gateway]):
 
     local_modes = LOCAL_MODES
     cloud_first = True
-    volatile_fields = VOLATILE_FIELDS | {"FloorTemperature", "RoomTemperature"}
+    measured_fields = frozenset({"FloorTemperature", "RoomTemperature"})
+    volatile_fields = VOLATILE_FIELDS | measured_fields
 
     def _parse(self, data: dict[str, Any]) -> Thermostat:
         return Thermostat.from_wd5_json(data)

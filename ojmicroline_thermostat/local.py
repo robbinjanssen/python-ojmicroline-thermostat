@@ -90,6 +90,11 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
     local_modes: tuple[int, ...] = ()
     # The fields of the thermostat JSON that change by themselves.
     volatile_fields: frozenset[str] = VOLATILE_FIELDS
+    # The fields a thermostat measures. For a thermostat on the gateway they
+    # only come from the thermostat: the cloud does not hear from it in local
+    # mode, so what it answers is no measurement. The sensors of a tester
+    # showed 0 until the first report of the thermostat.
+    measured_fields: frozenset[str] = frozenset()
     # Whether a mode for a relayed thermostat goes through the cloud first.
     # The cloud of the WD5 series keeps the mode of a group and does not take
     # over what the thermostat reports, so a mode the gateway set alone would
@@ -171,7 +176,8 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         Returns
         -------
             A list of Thermostat objects. One that is connected to the gateway
-            has the values it reported itself.
+            has the values it reported itself. Its measured temperature is
+            None until it reported one, about a minute after it connected.
 
         Raises
         ------
@@ -464,8 +470,10 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         data = dict(self._snapshot[serial])
         on_gateway = self.on_gateway(serial)
         if on_gateway:
-            # The cloud does not know whether the thermostat is connected here.
+            # The cloud does not know whether the thermostat is connected here,
+            # nor what it measures: that is not known until it tells.
             data["Online"] = False
+            data.update(dict.fromkeys(self.measured_fields))
             data.update(self._live.get(serial, {}))
         thermostat = self._parse(data)
         if not self.cloud_reaches(serial):

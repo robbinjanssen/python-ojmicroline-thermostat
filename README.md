@@ -410,6 +410,12 @@ that the cloud API serves, or a change made in the vendor's app while a
 thermostat is not relayed, shows up in `get_thermostats()`, so keep calling
 that now and then.
 
+What a thermostat on the gateway measures comes from the thermostat alone,
+because the cloud does not hear from it in local mode. A thermostat reports
+its temperature about once a minute: until the first report after it
+connected, `temperature` (WG4) or `temperature_room` and `temperature_floor`
+(WD5) are `None`, and `get_current_temperature()` returns 0.
+
 For the WD5 series the example is the same without the profiles:
 
 ```python

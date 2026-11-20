@@ -33,11 +33,15 @@ class WG4LocalAPI(LocalAPI[WG4API, WG4Gateway]):
     """
 
     local_modes = LOCAL_MODES
-    volatile_fields = VOLATILE_FIELDS | {
-        "LoadMeasuredWatt",
-        "SetPointTemp",
-        "Temperature",
-    }
+    measured_fields = frozenset({"Temperature"})
+    volatile_fields = (
+        VOLATILE_FIELDS
+        | measured_fields
+        | {
+            "LoadMeasuredWatt",
+            "SetPointTemp",
+        }
+    )
 
     async def set_energy_price(self, resource: Thermostat, price: float) -> bool:
         """Set the price per kWh through the cloud API, and remember it.

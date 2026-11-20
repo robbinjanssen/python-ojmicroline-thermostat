@@ -319,6 +319,27 @@ async def test_thermostat_on_the_gateway_reports_for_itself(
     assert thermostats[OTHER].temperature == 2001
 
 
+async def test_temperature_is_not_known_until_the_thermostat_measured_it(
+    session: aiohttp.ClientSession, cloud: WG4API, gateway: WG4Gateway
+) -> None:
+    """What the cloud measured last is not what a thermostat here measures.
+
+    The cloud does not hear from a thermostat in local mode. Right after it
+    connected, a thermostat has not reported its temperature yet.
+    """
+    _, api = _client(WG4LocalAPI(cloud, gateway, snapshot=_snapshot()), session)
+    _report(gateway, SERIAL, Online=True, RegulationMode=1)
+
+    thermostats = _by_serial(await api.get_notifications())
+    assert thermostats[SERIAL].online is True
+    assert thermostats[SERIAL].temperature is None
+    # A thermostat the cloud serves keeps what the cloud measured.
+    assert thermostats[OTHER].temperature == 2001
+
+    _report(gateway, SERIAL, Temperature=1950)
+    assert _by_serial(await api.get_notifications())[SERIAL].temperature == 1950
+
+
 async def test_known_thermostat_is_offline_until_it_connects(
     aresponses: ResponsesMockServer,
     session: aiohttp.ClientSession,

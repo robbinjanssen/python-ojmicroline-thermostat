@@ -188,6 +188,33 @@ async def _thermostat_again(api: WD5LocalAPI, serial: str) -> Thermostat:
     return api._thermostat(serial)
 
 
+async def test_temperature_is_not_known_until_the_thermostat_measured_it(
+    api: WD5LocalAPI, gateway: WD5Gateway
+) -> None:
+    """What the cloud measured last is not what a thermostat here measures.
+
+    The cloud does not hear from a thermostat in local mode; the sensors of
+    a tester showed 0 until the thermostat's first report. A thermostat
+    reports its temperatures about once a minute, so right after it
+    connected they are not known.
+    """
+    _report(gateway, SERIAL, Online=True, RegulationMode=REGULATION_SCHEDULE)
+
+    thermostat = await _thermostat(api)
+    assert thermostat.online is True
+    assert thermostat.temperature_room is None
+    assert thermostat.temperature_floor is None
+    # A thermostat the cloud serves keeps what the cloud measured.
+    other = await _thermostat_again(api, OTHER)
+    assert other.temperature_room is not None
+    assert other.temperature_floor is not None
+
+    _report(gateway, SERIAL, RoomTemperature=2150, FloorTemperature=2300)
+    thermostat = await _thermostat_again(api, SERIAL)
+    assert thermostat.temperature_room == 2150
+    assert thermostat.temperature_floor == 2300
+
+
 async def test_local_only_offers_the_modes_of_the_gateway(
     api: WD5LocalAPI, gateway: WD5Gateway
 ) -> None:

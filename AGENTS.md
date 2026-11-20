@@ -154,6 +154,11 @@ work on a branch.
     be parsed (`LocalAPI._check()`); a damaged one would be stored for good.
   - `on_snapshot` only fires for a change that lasts; list what changes by
     itself in `volatile_fields` of the series.
+  - What a thermostat on the gateway measures only comes from the thermostat
+    (`measured_fields`): the cloud does not hear from it in local mode, so
+    what it answers is no measurement (a tester's sensors showed 0). Until
+    the thermostat reports one, about a minute after it connected, the
+    temperature is `None`.
   - The history is written in UTC. A command that timed out or was refused
     is also logged as a warning, so it shows without debug logging.
 
