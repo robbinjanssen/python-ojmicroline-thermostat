@@ -22,6 +22,12 @@ recording the profile, a change through the cloud arriving as a command,
 answering the thermostat locally, answering it locally while OJ's gateway was
 unreachable, and relaying it again once OJ's gateway was back.
 
+Reported on 20 November by a second user, for three UWG4 thermostats with
+firmware 1012M204 and 1012M202 in relay mode: with all internet traffic of
+the thermostats blocked, so that only the relay reached OJ's gateway, the
+vendor's app, the gateway and the thermostat itself each set a thermostat,
+and each showed what another had changed.
+
 On 13 November the thermostat acknowledged the commands of this gateway 13
 to 33 seconds after they were sent, which was too late for the gateway. On 14
 November it acknowledged 15 of the same commands within 0.8 to 2.5 seconds,
@@ -68,7 +74,11 @@ relayed and answered locally. Why is an [open question](#open-questions).
 
 The gateway requires the login as the first message, within 30 seconds, and
 closes the connection on a second login. A thermostat that stays silent for
-180 seconds is disconnected.
+100 seconds is disconnected: a heartbeat that is 40 seconds late. Nothing
+tells sooner that a connection is gone when the thermostat loses power or
+its network, because it only speaks once a minute. Seen on an OWD5: its
+heartbeats came 59.8 seconds apart, also in a minute in which it took in a
+command only after 9 seconds.
 
 ## Sequence numbers
 
