@@ -280,6 +280,219 @@ thermostat. Notifications are queued per session, so the listener receives
 every thermostat once when the subscription starts and again whenever the
 client has to log in again.
 
+### Local gateway (WG4 and WD5, experimental)
+
+A thermostat keeps a connection open to OJ's device gateway and does not check
+that gateway's certificate. If a DNS record on your network points the
+hostname of that gateway at the machine that runs this library, the thermostat
+connects to a gateway of this library instead. The API that goes with it then
+reads and sets the thermostat without the cloud.
+
+| Series | Hostname the thermostat looks for | Port | Gateway | API |
+| :----- | :-------------------------------- | :--- | :------ | :-- |
+| WG4 | `na-thermos.ojelectronics.com` (`WG4_NORTH_AMERICA`) | 9533 | `WG4Gateway` | `WG4LocalAPI` |
+| WD5 | `owd5-r1099-thermostat.ojelectronics.com` for the SWATT app (`WD5_R1099`), `owd5-sl003-thermostat.ojelectronics.com` for Schlüter in Europe (`WD5_SL003`), `owd5-oj001-thermostat.ojelectronics.com` for the OJ Microline app (`WD5_OJ001`) | 9513 | `WD5Gateway` | `WD5LocalAPI` |
+
+This is experimental. The WG4 gateway has run against four real thermostats
+of two users.
+The connection, the relay, recording the profile, answering the thermostat
+locally and falling back to that while OJ's gateway was unreachable worked.
+In the first test the thermostat acknowledged commands too late; in the
+second it acknowledged all of them in time, and why they differed is not
+known. The WD5 gateway has run against OWD5 thermostats of three testers,
+with the relay and in local mode: the connection, the relay and commands of
+the gateway worked. A thermostat's Wi-Fi can be asleep for up to about half a
+minute, so a command may take that long.
+
+The gateway has two modes:
+
+| Mode | What the gateway does | The vendor's app |
+| :--- | :-------------------- | :--------------- |
+| `GatewayMode.RELAY` | Passes the connection on to OJ's gateway, and records the answers OJ's gateway gives the thermostat as its profile. When OJ's gateway cannot be reached, or does not answer the login of the thermostat within 3 seconds, a thermostat that has a profile is answered locally. It connects again, to be relayed, once OJ's gateway answers its login. | Keeps working |
+| `GatewayMode.LOCAL` | Answers the thermostat with its recorded profile. OJ's gateway is never contacted. | Shows the thermostat offline |
+
+A WG4 thermostat needs a profile before it can be answered locally, so start
+in relay mode. A WD5 thermostat needs none. The gateway sets the schedule and
+manual modes of a WG4 thermostat, and the schedule, comfort, manual, boost,
+eco and frost protection modes of a WD5 thermostat. Other modes and the
+energy usage still go through the cloud API, which only reaches a thermostat
+that is relayed.
+
+The Wi-Fi of a thermostat can take nothing in for up to about 30 seconds
+while it saves power, so a command may take that long to arrive. The gateway
+waits 40 seconds for the acknowledgement. When it takes longer, the call fails
+with `OJMicrolineTimeoutError`, but when the acknowledgement still comes, the
+new state is reported like any other change.
+
+```python
+import asyncio
+import json
+from pathlib import Path
+
+from ojmicroline_thermostat import (
+    DeviceProfile,
+    GatewayMode,
+    OJMicroline,
+    Thermostat,
+    WG4API,
+    WG4Gateway,
+    WG4LocalAPI,
+    server_ssl_context,
+)
+
+STORE = Path("gateway.json")
+
+
+def on_update(thermostat: Thermostat) -> None:
+    print(f"{thermostat.name}: {thermostat.get_current_temperature() / 100}°C")
+
+
+async def main():
+    stored = json.loads(STORE.read_text()) if STORE.exists() else {}
+
+    def save_snapshot(snapshot):
+        stored["snapshot"] = snapshot
+        STORE.write_text(json.dumps(stored))
+
+    def save_profile(serial, profile):
+        stored.setdefault("profiles", {})[serial] = profile.to_dict()
+        STORE.write_text(json.dumps(stored))
+
+    # The thermostat accepts any certificate, so a self-signed one will do:
+    # openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+    #     -subj /CN=na-thermos.ojelectronics.com \
+    #     -keyout gateway.key -out gateway.crt
+    context = await asyncio.to_thread(server_ssl_context, "gateway.crt", "gateway.key")
+    gateway = WG4Gateway(
+        context,
+        mode=GatewayMode.RELAY,
+        profiles={
+            serial: DeviceProfile.from_dict(profile)
+            for serial, profile in stored.get("profiles", {}).items()
+        },
+    )
+    gateway.on_profile = save_profile
+    api = WG4LocalAPI(
+        WG4API(username="<your-username>", password="<your-password>"),
+        gateway,
+        snapshot=stored.get("snapshot"),
+        on_snapshot=save_snapshot,
+    )
+
+    async with OJMicroline(api=api) as client:
+        # The gateway only accepts the thermostats of the account, so fetch
+        # them before it starts.
+        await client.get_thermostats()
+        await gateway.start()
+        unsubscribe = client.subscribe(on_update)
+        await asyncio.sleep(600)
+        unsubscribe()
+        await gateway.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Four things are yours to store: the certificate, the profile of each
+thermostat (`on_profile`), the snapshot (`on_snapshot`) and the serial numbers
+of the thermostats that connected to the gateway (`known`).
+
+- The snapshot is the last answer of the cloud API, which keeps the
+  thermostats usable when the cloud cannot be reached. It holds the email
+  address of the account. `on_snapshot` is not called for a snapshot that only
+  differs in what changes by itself, such as a measured temperature.
+- Pass the known serial numbers in again after a restart (`known=`). In local
+  mode a thermostat that connected before does not reach the cloud, which
+  the API cannot tell otherwise until the thermostat has connected again.
+
+Notifications come from the thermostats on the gateway only. A thermostat
+that the cloud API serves, or a change made in the vendor's app while a
+thermostat is not relayed, shows up in `get_thermostats()`, so keep calling
+that now and then.
+
+What a thermostat on the gateway measures comes from the thermostat alone,
+because the cloud does not hear from it in local mode. A thermostat reports
+its temperature about once a minute: until the first report after it
+connected, `temperature` (WG4) or `temperature_room` and `temperature_floor`
+(WD5) are `None`, and `get_current_temperature()` returns 0.
+
+For the WD5 series the example is the same without the profiles:
+
+```python
+from ojmicroline_thermostat import WD5_R1099, WD5API, WD5Gateway, WD5LocalAPI
+
+gateway = WD5Gateway(context, mode=GatewayMode.RELAY, endpoint=WD5_R1099)
+api = WD5LocalAPI(
+    WD5API(
+        api_key="<app-api-key>",
+        customer_id=99,
+        username="<your-username>",
+        password="<your-password>",
+    ),
+    gateway,
+    snapshot=stored.get("snapshot"),
+    on_snapshot=save_snapshot,
+)
+```
+
+The cloud API of the WD5 series sets a mode for every thermostat of a group.
+A command of the gateway only reaches the thermostat it is sent to, but the
+cloud does not take over the mode the thermostat then reports, so the
+vendor's app would not show it. `WD5LocalAPI` therefore sets a mode through
+the cloud while the gateway relays the thermostat (`cloud_first`). The
+gateway sets the mode itself when the cloud does not reach the thermostat,
+in local mode or while OJ's gateway is unreachable, and when the cloud API
+cannot be reached, is too busy (HTTP 408 or 429) or takes longer than 10
+seconds. A request the cloud API refuses (`OJMicrolineHTTPError` with
+another 4xx status) stays an error. `cloud_unreachable(error)` tells the two
+apart for an error of the cloud API.
+
+A caller that sets more than the mode in the cloud, such as a whole group,
+passes its own way of doing that as `through_cloud=` to
+`set_regulation_mode()`. The API then still chooses between the cloud and the
+gateway.
+
+Both gateways share these members:
+
+| Member | Description |
+| :----- | :---------- |
+| `start()`, `stop()` | Start and stop listening. The port is that of the endpoint unless `listen_port` says otherwise. |
+| `connected` | The serial numbers of the thermostats that are connected. |
+| `is_relayed(serial)` | Whether a thermostat is connected to OJ's gateway as well. |
+| `on_connected` | Called with the serial number of a thermostat that logged in. |
+| `on_upstream`, `upstream_status` | Whether OJ's gateway can be used. `UpstreamStatus.UNTRUSTED` means its certificate does not match the pinned fingerprint; nothing is sent to it then. |
+| `upstream_fingerprint` | The SHA-256 fingerprint of the certificate OJ's gateway showed last. |
+| `history` | The last 300 events on the connections, each with its time in UTC: connections and how TLS went, every message by field number and decoded temperature, commands and their answers. The same lines are logged at debug level by `ojmicroline_thermostat.gateway.server`. A WG4 login, which holds the email address of the account, is never in it. |
+
+And both APIs these:
+
+| Member | Description |
+| :----- | :---------- |
+| `cloud_error` | Why the cloud API could not be used when the thermostats were last fetched, or `None`. |
+| `cloud` | The cloud API (`WG4API` or `WD5API`), for cloud-only calls. Set the energy price of a WG4 thermostat with `WG4LocalAPI.set_energy_price()`, which also remembers it. |
+| `on_gateway(serial)` | Whether the gateway serves a thermostat: it is connected now, or, in local mode, it was before. |
+| `cloud_reaches(serial)` | Whether a change through the cloud API reaches a thermostat: it is not on the gateway, or it is relayed. |
+| `can_set(serial, mode)` | Whether `set_regulation_mode()` can set a mode right now. |
+| `sets_on_gateway(serial, mode)` | Whether `set_regulation_mode()` sends a mode to the gateway rather than through the cloud. |
+| `set_on_gateway(resource, mode, temperature, duration)` | Send one of `local_modes` to a thermostat on the gateway, for when a change through the cloud failed because the cloud API cannot be reached. |
+| `cloud_first` | Whether a mode for a relayed thermostat goes through the cloud: `True` for the WD5 series. |
+| `cloud_thermostat(serial)` | A thermostat as the cloud API described it last, without what it reported to the gateway. |
+| `refresh()` | Fetch what the cloud API knows right now, and raise if it fails. Call it before a change that the cloud replaces as a whole, such as the settings of a group. |
+| `known` | The serial numbers of the thermostats the gateway served, to store and pass in again. |
+| `local_modes` | The regulation modes the gateway sets by itself. |
+
+Every device on your network can reach the gateway's port. The gateway only
+serves the serial numbers of the account, but a serial number is not a secret:
+run it on a network you trust.
+
+The protocol between thermostat and gateway is described in
+[docs/device-protocol.md](docs/device-protocol.md). That of the WG4 series was
+worked out by
+[peskyAdmin/schluter-local](https://github.com/peskyAdmin/schluter-local),
+from which the gateway is adapted, and that of the WD5 series by
+[patricknitsch/ioBroker.schlueter-thermostat](https://github.com/patricknitsch/ioBroker.schlueter-thermostat).
+
 ## Contributing
 
 This is an active open-source project. We are always open to people who want to
