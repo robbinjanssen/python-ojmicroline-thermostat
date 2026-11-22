@@ -3,6 +3,7 @@
 """Test the main OJMicroline class internals."""
 
 import asyncio
+import copy
 import json
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ from ojmicroline_thermostat import (
     OJMicroline,
     OJMicrolineConnectionError,
     OJMicrolineError,
+    OJMicrolineHTTPError,
     OJMicrolineTimeoutError,
     OJMicrolineUnauthorizedError,
     Thermostat,
@@ -89,6 +91,7 @@ async def test_content_type(aresponses: ResponsesMockServer) -> None:
         Response(
             status=200,
             headers={"Content-Type": "foo/Bar"},
+            text="A page for user@example.com",
         ),
     )
 
@@ -102,8 +105,21 @@ async def test_content_type(aresponses: ResponsesMockServer) -> None:
             session=session,
         )
 
-        with pytest.raises(OJMicrolineError):
+        with pytest.raises(OJMicrolineError) as raised:
             assert await client._request("test")
+        # The error tells what came back, without the answer itself: that
+        # may hold the email address of the account.
+        assert "foo/bar" in str(raised.value)
+        assert "user@example.com" not in str(raised.value)
+
+
+def test_http_error_can_be_copied() -> None:
+    """An error is copied from its arguments, which the status is not one of."""
+    error = OJMicrolineHTTPError("The OJ Microline API responded with HTTP 503.", 503)
+
+    for copied in (copy.copy(error), copy.deepcopy(error)):
+        assert str(copied) == str(error)
+        assert copied.status == 503
 
 
 @pytest.mark.asyncio

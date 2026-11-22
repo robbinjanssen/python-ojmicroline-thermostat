@@ -253,8 +253,10 @@ def test_parse_energy_usage_response_failed(data: dict[str, Any]) -> None:
         password="test",
     )
 
-    with pytest.raises(OJMicrolineResultsError):
+    with pytest.raises(OJMicrolineResultsError) as raised:
         api.parse_energy_usage_response(data)
+    # The answer stays out of the error, which ends up in logs.
+    assert raised.value.args == ("Unable to get energy usage via API.",)
 
 
 @pytest.mark.asyncio
