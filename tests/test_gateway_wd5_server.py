@@ -68,7 +68,7 @@ HEARTBEAT = (
     encode_field(1, 4)
     + encode_field(4, 1)
     + encode_field(
-        6, encode_field(2, 2150) + encode_field(3, 2300) + encode_field(4, 1)
+        6, encode_field(2, 2150) + encode_field(3, 2300) + encode_field(5, 1)
     )
 )
 # What the cloud API knows of the thermostat, in its own names and units.
