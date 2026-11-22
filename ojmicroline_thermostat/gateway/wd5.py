@@ -15,8 +15,8 @@ From the thermostat:
     field 5          login: 5.1 the serial number, 5.2 the device type, 5.3
                      the firmware, 5.5 the clock {1 hour, 2 minute, 3 second}
     field 6          heartbeat, about once a minute: 6.1 the time, 6.2 the
-                     room temperature, 6.3 the floor temperature, 6.4 whether
-                     the floor is heating; 6.5 to 6.7 are not known
+                     room temperature, 6.3 the floor temperature, 6.5 whether
+                     the floor is heating; 6.4, 6.6 and 6.7 are not known
     field 7          device info: 7.2 the name, 7.3 the time zone in seconds,
                      7.16 the MAC address, 7.17 the load in W
     field 8          schedule: 8.2 the week, which has a day in every field 1
@@ -101,7 +101,10 @@ _LOGIN_CLOCK = 5
 _TELEMETRY_TIME = 1
 _TELEMETRY_ROOM = 2
 _TELEMETRY_FLOOR = 3
-_TELEMETRY_HEATING = 4
+# Seen on an OWD5 with firmware 1013W213, next to the power meter of the
+# house: 6.5 is 1 while the floor draws power and 0 while it does not. 6.4,
+# which the project this comes from reads as heating, stayed 0 there.
+_TELEMETRY_HEATING = 5
 _INFO_NAME = 2
 _INFO_TIME_ZONE = 3
 _INFO_LOAD = 17

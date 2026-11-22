@@ -119,6 +119,40 @@ HEARTBEAT = (
     )
 )
 
+# Seen on an OWD5 with firmware 1013W213: its heartbeats while the floor drew
+# power and right after the relay switched off. Field 6.4 was 0 in both. The
+# times in 6.1 and 12.1 were not logged.
+HEATING_HEARTBEAT = (
+    encode_field(1, 6632)
+    + encode_field(4, 1)
+    + encode_field(
+        6,
+        encode_field(1, 848681495)
+        + encode_field(2, 2098)
+        + encode_field(3, 2385)
+        + encode_field(4, 0)
+        + encode_field(5, 1)
+        + encode_field(6, 0)
+        + encode_field(7, 0),
+    )
+    + encode_field(12, encode_field(1, 848681495) + encode_field(2, 3600))
+)
+IDLE_HEARTBEAT = (
+    encode_field(1, 6635)
+    + encode_field(4, 1)
+    + encode_field(
+        6,
+        encode_field(1, 848681674)
+        + encode_field(2, 2116)
+        + encode_field(3, 2404)
+        + encode_field(4, 0)
+        + encode_field(5, 0)
+        + encode_field(6, 0)
+        + encode_field(7, 0),
+    )
+    + encode_field(12, encode_field(1, 848681674) + encode_field(2, 3600))
+)
+
 # Logged: the command of OJ's gateway for the manual mode at 23 °C.
 MANUAL_STATE = (
     encode_field(1, 847862879)
@@ -377,11 +411,29 @@ def test_decode_telemetry_with_missing_parts() -> None:
     room = Message.parse(encode_field(6, encode_field(2, 2100)))
     assert decode_telemetry(room) == {"RoomTemperature": 2100}
 
-    idle = Message.parse(encode_field(6, encode_field(3, 2500) + encode_field(4, 0)))
+    idle = Message.parse(encode_field(6, encode_field(3, 2500) + encode_field(5, 0)))
     assert decode_telemetry(idle) == {"FloorTemperature": 2500, "Heating": False}
 
     assert not decode_telemetry(Message.parse(encode_field(6, b"")))
     assert not decode_telemetry(Message.parse(UPLOAD))
+
+
+def test_decode_telemetry_reads_heating_from_field_5() -> None:
+    """Field 6.5 tells that the floor is heating; field 6.4 does not."""
+    assert decode_telemetry(Message.parse(HEATING_HEARTBEAT)) == {
+        "RoomTemperature": 2098,
+        "FloorTemperature": 2385,
+        "Heating": True,
+    }
+    assert decode_telemetry(Message.parse(IDLE_HEARTBEAT)) == {
+        "RoomTemperature": 2116,
+        "FloorTemperature": 2404,
+        "Heating": False,
+    }
+
+    # Field 6.4 alone says nothing about heating.
+    other = Message.parse(encode_field(6, encode_field(4, 1)))
+    assert not decode_telemetry(other)
 
 
 def test_decode_telemetry_rejects_malformed_heartbeat() -> None:
@@ -1072,7 +1124,11 @@ def test_command() -> None:
 def test_describe_logged_messages() -> None:
     """The summary shows what is decoded and the fields that are not."""
     assert describe(Message.parse(HEARTBEAT)) == (
-        "seq=14 fields=1,4,6 room=19.73C floor=33.01C heating=1 6.5=1"
+        "seq=14 fields=1,4,6 room=19.73C floor=33.01C heating=1 6.4=1"
+    )
+    # As the gateway logged it; the unknown fields show next to the flag.
+    assert describe(Message.parse(HEATING_HEARTBEAT)) == (
+        "seq=6632 fields=1,4,6,12 room=20.98C floor=23.85C heating=1 6.4=0 6.6=0 6.7=0"
     )
     assert describe(Message.parse(UPLOAD)) == (
         "seq=13 fields=1,4,7,9 mode=1 (schedule) vacation=0 zone=3600 9.8=1 9.9=0"

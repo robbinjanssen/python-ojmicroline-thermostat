@@ -298,6 +298,19 @@ Seen:
   it, the thermostats connected again within 33 and 46 seconds.
 - One thermostat reported an empty name in 7.2, while the cloud API named
   it. An empty name is therefore not reported.
+- Whether the floor is heating is in 6.5 of the heartbeat, not in 6.4. On
+  22 November 2026, in local mode, the heartbeats of one thermostat were laid
+  next to the power its floor drew, on the power meter of the house. 6.5 was
+  1 in the heartbeats while the floor drew 3.9 kW, 0 from the heartbeat after
+  the relay switched off at the setpoint, and 1 again once it switched on:
+  twelve heartbeats and two switches. 6.4 was 0 in all of them.
+- The energy usage of the cloud API is a whole number of minutes times the
+  load a thermostat reports in 7.17 (4010 W and 500 W here): every hourly
+  value is a multiple of the load divided by 60. Over four hours it was
+  6.68 kWh, where the power meter of the house measured about 6.7 kWh above
+  the base load. The cloud appears to count the heartbeats in which the
+  floor is heating; that was not seen. The floor itself drew between 3.9 and
+  4.1 kW, with the mains voltage.
 
 ### Where the thermostat connects
 
@@ -326,7 +339,7 @@ to 1, and a message that wants an answer has field 4 set to 1.
 | From the thermostat | Meaning | Answer of the gateway |
 | --- | --- | --- |
 | Field 5 | Login: the serial number, the device type, the firmware and the clock. It holds no email address | Acknowledgement with 4 = 1 and 12 = {1: server time}, then a request for the full upload: sequence 0, 4 = 1, 10 = {1: server time, 2: 1} |
-| Field 6 | Heartbeat, about once a minute: the room and floor temperature in 1/100 °C, and whether the floor is heating | Acknowledgement with the server time |
+| Field 6 | Heartbeat, about once a minute: the room and floor temperature in 1/100 °C, and in 6.5 whether the floor is heating | Acknowledgement with the server time |
 | Field 7 | Device info: the name, the time zone in seconds, the load in W | Acknowledgement with the server time |
 | Field 8 | The schedule | Acknowledgement with the server time |
 | Field 9 | The state, with only the fields that matter in its mode | Acknowledgement with the server time |
@@ -386,8 +399,11 @@ only sends it itself when the cloud does not reach the thermostat.
   and the schedule, comfort, manual, eco and frost protection modes have
   been seen.
 - What 9.8 and 9.9 of the state mean; OJ's gateway sends 1 and 0. And what
-  6.5 to 6.7 of the heartbeat mean. Seen: 6.5 was 1 while a comfort hold was
-  on, set in the app and set by the gateway, and 0 otherwise.
+  6.4, 6.6 and 6.7 of the heartbeat mean. The ioBroker adapter reads 6.4 as
+  heating, and logged a heartbeat of a heating OWD5 with firmware 1013W220
+  in which 6.4 and 6.5 were both 1. Seen: 6.4 was 0 in every heartbeat of
+  three OWD5 thermostats, also while the floor of one was heating, and 6.6
+  and 6.7 were 0.
 - Whether the time zone a thermostat reports (7.3) includes summer time.
   Seen: 3600 in November, in Central European time. The end of a comfort
   hold or a boost is written in the local time of the thermostat, so an hour
