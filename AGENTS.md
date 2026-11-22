@@ -162,6 +162,11 @@ work on a branch.
     temperature is `None`.
   - The history is written in UTC. A command that timed out or was refused
     is also logged as a warning, so it shows without debug logging.
+  - Whether a WD5 floor is heating is in 6.5 of the heartbeat, not in 6.4:
+    seen next to a power meter. OJ's cloud counts the energy usage from the
+    reports it gets, as minutes of heating times the load. `on_usage` tells
+    what the reports are worth that OJ's gateway does not get
+    (`LocalAPI._count()`), so the two never count the same report.
 
 ## Tests
 

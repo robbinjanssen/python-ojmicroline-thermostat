@@ -556,3 +556,76 @@ async def test_refresh_fetches_the_cloud_or_tells_why_not(
     aresponses.add(HOST, "/api/Group/GroupContents", "GET", Response(status=500))
     with pytest.raises(OJMicrolineHTTPError):
         await api.refresh()
+
+
+async def test_usage_is_counted_where_the_cloud_does_not_hear_the_thermostat(
+    gateway: WD5Gateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A report that OJ's gateway does not get is counted, with the load.
+
+    The cloud counts a whole number of minutes times the load, from the
+    reports it gets. Here the time between two reports is counted, which is
+    a minute, give or take a second.
+    """
+    now = [1000.0]
+    monkeypatch.setattr(local_api, "monotonic", lambda: now[0])
+    used: list[tuple[str, float]] = []
+    cloud = WD5API(
+        host=HOST,
+        api_key="ap1-k3y-v3ry-s3cret",
+        customer_id=99,
+        username="py",
+        password="test",
+    )
+    WD5LocalAPI(
+        cloud,
+        gateway,
+        snapshot=_snapshot(),
+        on_usage=lambda serial, energy: used.append((serial, energy)),
+    )
+
+    def report(seconds: float, serial: str = SERIAL, **fields: Any) -> None:
+        now[0] += seconds
+        _report(gateway, serial, **fields)
+
+    # The thermostat tells its load when it uploads its device info. Its
+    # first report counts for a minute: nothing tells when it started.
+    report(0, LoadWatts=4010)
+    assert not used
+    report(30, RoomTemperature=2098, Heating=True)
+    assert used == [(SERIAL, pytest.approx(4010 * 60 / 3_600_000))]
+
+    # From then on a report counts for the time since the one before it.
+    report(59.7, Heating=True)
+    assert used[-1] == (SERIAL, pytest.approx(4010 * 59.7 / 3_600_000))
+    # A floor that is not heating uses nothing, which is told as well.
+    report(60, Heating=False)
+    assert used[-1] == (SERIAL, 0.0)
+    # A report that says nothing about heating is no heartbeat.
+    report(5, RegulationMode=REGULATION_MANUAL)
+    assert len(used) == 3
+
+    # After a thermostat was away, nothing tells what it did in between.
+    report(600, Heating=True)
+    assert used[-1] == (SERIAL, pytest.approx(4010 * 60 / 3_600_000))
+
+    # OJ's gateway gets the reports of a relayed thermostat, and counts them.
+    gateway._links[SERIAL] = Mock(upstream=object())  # pylint: disable=protected-access
+    report(60, Heating=True)
+    assert len(used) == 4
+    # Once it is answered locally again, the time since that report counts.
+    gateway._links[SERIAL] = Mock(upstream=None)  # pylint: disable=protected-access
+    report(61, Heating=True)
+    assert used[-1] == (SERIAL, pytest.approx(4010 * 61 / 3_600_000))
+
+    # A thermostat that did not tell its load cannot be counted.
+    report(0, serial=OTHER, Heating=True)
+    assert len(used) == 5
+
+
+async def test_usage_is_not_counted_without_a_listener(
+    api: WD5LocalAPI, gateway: WD5Gateway
+) -> None:
+    """Reports are taken in as before when nobody adds the usage up."""
+    _report(gateway, SERIAL, LoadWatts=4010, Heating=True)
+    assert (await _thermostat(api)).heating is True

@@ -67,6 +67,12 @@ class WD5LocalAPI(LocalAPI[WD5API, WD5Gateway]):
     def _parse(self, data: dict[str, Any]) -> Thermostat:
         return Thermostat.from_wd5_json(data)
 
+    def _load(self, serial: str) -> int | None:
+        # Only the thermostat tells its load, in the device info it uploads
+        # after it logged in; the cloud API does not have it.
+        load = self._live.get(serial, {}).get("LoadWatts")
+        return load if isinstance(load, int) else None
+
     async def _set_on_gateway(
         self,
         resource: Thermostat,
