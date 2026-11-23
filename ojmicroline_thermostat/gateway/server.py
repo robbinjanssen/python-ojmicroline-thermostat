@@ -517,17 +517,22 @@ class DeviceGateway(ABC, Generic[_LinkT]):  # pylint: disable=too-many-instance-
         return link
 
     async def _command(
-        self, serial: str, prepare: Callable[[_LinkT], _Command]
-    ) -> None:
+        self, serial: str, prepare: Callable[[_LinkT], _Command | None]
+    ) -> bool:
         """Send a thermostat a command, one at a time per thermostat.
 
         Args:
         ----
             serial: The serial number of the thermostat.
             prepare: Returns how to build the command and what to do once it
-                is accepted, from what the connection knows by then. It
-                raises OJMicrolineConnectionError if the thermostat has not
-                reported what a command starts from.
+                is accepted, from what the connection knows by then; None if
+                there is nothing to change. It raises
+                OJMicrolineConnectionError if the thermostat has not reported
+                what a command starts from.
+
+        Returns:
+        -------
+            Whether a command was sent.
 
         Raises:
         ------
@@ -542,8 +547,11 @@ class DeviceGateway(ABC, Generic[_LinkT]):  # pylint: disable=too-many-instance-
             if link.closed:
                 msg = "The thermostat disconnected from the gateway."
                 raise OJMicrolineConnectionError(msg)
-            build, accept = prepare(link)
-            await self._send_command(link, build, accept)
+            command = prepare(link)
+            if command is None:
+                return False
+            await self._send_command(link, *command)
+        return True
 
     def _underway(self, link: _LinkT) -> list[Message]:
         """Return what OJ's gateway sent a thermostat that is not answered yet.

@@ -145,7 +145,8 @@ class Thermostat:
     def from_wg4_json(cls, data: dict[str, Any]) -> Thermostat:
         """Return a new Thermostat instance based on JSON from the WG4-series API.
 
-        The WG4 API does return schedule data but it is currently ignored.
+        The schedule is given in the form of the WD5 API, see
+        parse_wg4_schedule().
 
         Args:
         ----
@@ -194,6 +195,7 @@ class Thermostat:
             utc_offset=datetime.strptime(tz_offset, "%z").utcoffset(),
             load_watts=parse_wg4_load(data),
             energy_price=data.get("KwhCharge"),
+            schedule=parse_wg4_schedule(data.get("Schedules")),
         )
 
     @classmethod
@@ -421,3 +423,51 @@ def parse_wg4_load(data: dict[str, Any]) -> int | None:
         load = data.get("LoadManuallySetWatt")
 
     return load or None
+
+
+def parse_wg4_schedule(days: Any) -> dict[str, Any] | None:
+    """Return the schedule of the WG4 API in the form of the WD5 API.
+
+    The WG4 API lists the days with their events, and calls the temperature
+    of an event TempFloor. The WD5 API has the days under Days, Monday first,
+    and calls it Temperature; a WG4 event is never on the next day. The days
+    keep their numbers, 1 for Monday to 7 for Sunday, as the WD5 API and the
+    thermostat on its local connection number them. 0 counts as Sunday too,
+    as it does for Schedule.from_json().
+
+    Args:
+    ----
+        days: The Schedules field of the thermostat JSON.
+
+    Returns:
+    -------
+        The schedule; None if there is none, or not one of seven days.
+
+    """
+    if not isinstance(days, list):
+        return None
+    try:
+        ordered = sorted(days, key=lambda day: (int(day["WeekDayGrpNo"]) - 1) % 7)
+        if [(int(day["WeekDayGrpNo"]) - 1) % 7 for day in ordered] != list(range(7)):
+            return None
+        return {
+            "Days": [
+                {
+                    "WeekDayGrpNo": day["WeekDayGrpNo"],
+                    "Events": [
+                        {
+                            "ScheduleType": event.get("ScheduleType", place),
+                            "Clock": event["Clock"],
+                            "Temperature": event["TempFloor"],
+                            "Active": bool(event["Active"]),
+                            "EventIsOnNextDay": False,
+                        }
+                        for place, event in enumerate(day["Events"])
+                    ],
+                }
+                for day in ordered
+            ]
+        }
+    except (AttributeError, KeyError, TypeError, ValueError):
+        # A schedule that is not understood must not keep the thermostat out.
+        return None

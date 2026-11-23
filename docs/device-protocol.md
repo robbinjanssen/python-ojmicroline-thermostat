@@ -115,6 +115,54 @@ matched by the order in which the messages were sent, see
   aiming for right now, in any mode. It is the only place where the current
   setpoint of the schedule shows up.
 
+## Schedule (field 8)
+
+Reported, in [issue 480 of the integration](https://github.com/robbinjanssen/home-assistant-ojmicroline-thermostat/issues/480),
+for one thermostat with firmware 1012M201; not seen by this library yet.
+
+- 8.1 is the time of the change, in seconds since 2000-01-01 UTC, and 8.2 the
+  week, which has a day in every field 1.
+- A day is {1 its number, 1 for Monday to 7 for Sunday; 2 an event, once per
+  event}.
+- An event is {1 the clock: 1 hour, 2 minute, 3 second; 2 the temperature;
+  3 whether it is active}. The thermostat writes every field, also one that
+  is 0.
+- The thermostat that was looked at has six events (places) a day, of which
+  the first is always active. An event that is switched off keeps its time
+  and temperature.
+- The temperatures are in 1/100 °C, unlike the setpoints of a hold. The
+  `Schedules` field of the cloud API has the same days and events, with the
+  temperature as `TempFloor`.
+- A day has no event on the next day, as a WD5 day has: the last event of a
+  day goes on until the first one of the next day.
+
+The gateway reports the schedule as the `Schedules` field of the cloud API. A
+schedule that is not seven days of six events each is not reported, and still
+passed back as the thermostat sent it.
+
+### Changing the schedule
+
+A schedule goes to the thermostat in a command: 8 the changed schedule with a
+new 8.1, and 9 the thermostat's own state with a new 9.1, so mode and
+setpoints stay. Only the fields of the days that change are written. The
+events go into the places of a day in order, the first into the first place;
+of the other places, one with the same time is chosen first, then one that is
+active. The places that are left over are switched off. The command starts
+from what OJ's gateway has under way, like any command.
+
+Reported: the thermostat acknowledges a changed schedule without uploading it
+again, and the change shows in the upload after it connects anew; that took
+about a minute. So once the thermostat accepts the command, the gateway
+closes its connection, before any other command can be sent on it, and
+compares the active events of the days that changed with the full upload on
+the next connection; what a place that is switched off holds does not count.
+It waits 90 seconds for that upload. A command that is accepted after the
+caller stopped waiting leaves the connection open, as another command may be
+on it by then.
+While relayed, that upload reaches OJ's gateway too, which is how the cloud
+would learn of the change; whether the vendor's app then shows it has not
+been tried.
+
 ## Commands to the thermostat
 
 A command has the shape of a change: field 1 the sequence number, 5 = 1, 8 the
@@ -261,15 +309,6 @@ These need a real thermostat to answer.
 - Fault codes.
 - Telemetry 15.4 to 15.7, and the device info fields 7.6, 7.7, 7.10, 7.11,
   7.13 and 7.14.
-- The schedule (field 8). It is passed back as the thermostat sent it.
-  Reported, in [issue 480 of the integration](https://github.com/robbinjanssen/home-assistant-ojmicroline-thermostat/issues/480):
-  8.1 is the time of the change and 8.2 the week, which has a day in every
-  field 1. A day is {1 its number, 1 for Monday to 7 for Sunday; 2 an event,
-  once per event}, and an event {1 the clock as hour, minute and second; 2 the
-  temperature; 3 whether it is active}. The thermostat that was looked at has
-  six events a day. The temperatures are in 1/100 °C, unlike the setpoints
-  of a hold. The thermostat acknowledges a changed schedule without uploading
-  it again, and the change shows in the upload after it connects anew.
 
 ## WD5 series
 

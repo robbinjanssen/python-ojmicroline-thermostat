@@ -20,6 +20,7 @@ from ojmicroline_thermostat.const import (
     SENSOR_ROOM_FLOOR,
 )
 from ojmicroline_thermostat.models import Thermostat
+from ojmicroline_thermostat.models.thermostat import parse_wg4_schedule
 
 from . import load_fixtures
 
@@ -196,6 +197,18 @@ async def test_thermostat_from_json_wg4() -> None:
 
     assert thermostat.utc_offset == timedelta(hours=-6)
     assert thermostat.load_watts == 1150
+
+    # The schedule in the form of the WD5 API, Monday first.
+    assert thermostat.schedule is not None
+    days = thermostat.schedule["Days"]
+    assert [day["WeekDayGrpNo"] for day in days] == [1, 2, 3, 4, 5, 6, 7]
+    assert days[0]["Events"][0] == {
+        "ScheduleType": 0,
+        "Clock": "06:00:00",
+        "Temperature": 3222,
+        "Active": True,
+        "EventIsOnNextDay": False,
+    }
 
     # Test the getter methods:
     assert thermostat.get_current_temperature() == 2200
@@ -405,7 +418,6 @@ WG4_ONLY_FIELDS = [
 
 WD5_ONLY_FIELDS = [
     "thermostat_id",
-    "schedule",
     "adaptive_mode",
     "open_window_detection",
     "daylight_saving_active",
@@ -441,3 +453,49 @@ WG5_ONLY_FIELDS = [
     "frost_protection_temperature",
     "vacation_mode",
 ]
+
+
+def _wg4_days(*numbers: int) -> list[dict[str, Any]]:
+    return [
+        {
+            "WeekDayGrpNo": number,
+            "Events": [{"Clock": "06:00:00", "TempFloor": 2000, "Active": 1}],
+        }
+        for number in numbers
+    ]
+
+
+def test_parse_wg4_schedule() -> None:
+    """The days are sorted Monday first; 0 counts as Sunday."""
+    schedule = parse_wg4_schedule(_wg4_days(0, 6, 5, 4, 3, 2, 1))
+    assert schedule is not None
+    assert [day["WeekDayGrpNo"] for day in schedule["Days"]] == [1, 2, 3, 4, 5, 6, 0]
+    # A place that is not given is the place in the list.
+    assert schedule["Days"][0]["Events"] == [
+        {
+            "ScheduleType": 0,
+            "Clock": "06:00:00",
+            "Temperature": 2000,
+            "Active": True,
+            "EventIsOnNextDay": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "days",
+    [
+        None,
+        {},
+        _wg4_days(1, 2, 3, 4, 5, 6),
+        _wg4_days(1, 2, 3, 4, 5, 6, 6),
+        _wg4_days(1, 2, 3, 4, 5, 6, 0, 7),
+        [{"WeekDayGrpNo": "x", "Events": []}],
+        [{"Events": []}],
+        [*_wg4_days(1, 2, 3, 4, 5, 6), {"WeekDayGrpNo": 7, "Events": [{}]}],
+        [*_wg4_days(1, 2, 3, 4, 5, 6), {"WeekDayGrpNo": 7, "Events": None}],
+    ],
+)
+def test_parse_wg4_schedule_that_is_not_understood(days: Any) -> None:
+    """A schedule that is not understood is none, and keeps nothing out."""
+    assert parse_wg4_schedule(days) is None

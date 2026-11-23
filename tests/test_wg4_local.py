@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
+from datetime import time
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
@@ -25,6 +26,7 @@ from ojmicroline_thermostat import (
     OJMicrolineConnectionError,
     OJMicrolineError,
     OJMicrolineResultsError,
+    OJMicrolineScheduleError,
     OJMicrolineTimeoutError,
     Thermostat,
     WG4Gateway,
@@ -801,3 +803,83 @@ async def test_usage_is_counted_with_the_load_of_the_cloud(
     # The fixture has a measured load of 1218 W for this thermostat.
     _report(gateway, SERIAL, Online=True, Temperature=2100, Heating=True)
     assert used == [(SERIAL, pytest.approx(1218 * 60 / 3_600_000))]
+
+
+async def test_schedule_from_the_cloud_and_the_thermostat(
+    cloud: WG4API, gateway: WG4Gateway
+) -> None:
+    """The schedule comes from the cloud, until the thermostat reports its own."""
+    api = WG4LocalAPI(cloud, gateway, snapshot=_snapshot())
+    thermostats = _by_serial(await api.get_notifications())
+    schedule = thermostats[SERIAL].schedule
+    assert schedule is not None
+    assert schedule["Days"][0]["Events"][0]["Clock"] == "06:00:00"
+
+    reported = [
+        {
+            "WeekDayGrpNo": number,
+            "Events": [
+                {
+                    "ScheduleType": 0,
+                    "Clock": "07:15:00",
+                    "TempFloor": 2050,
+                    "Active": True,
+                }
+            ],
+        }
+        for number in range(1, 8)
+    ]
+    _report(gateway, SERIAL, Online=True, Schedules=reported)
+    thermostats = _by_serial(await api.get_notifications())
+    schedule = thermostats[SERIAL].schedule
+    assert schedule is not None
+    assert schedule["Days"][6]["Events"] == [
+        {
+            "ScheduleType": 0,
+            "Clock": "07:15:00",
+            "Temperature": 2050,
+            "Active": True,
+            "EventIsOnNextDay": False,
+        }
+    ]
+
+
+async def test_set_schedule(cloud: WG4API, gateway: WG4Gateway) -> None:
+    """A schedule goes to a connected thermostat, once it fits the rules."""
+    api = WG4LocalAPI(cloud, gateway, snapshot=_snapshot())
+    _report(gateway, SERIAL, Online=True)
+    thermostats = _by_serial(await api.get_notifications())
+    thermostat = thermostats[SERIAL]
+    send = AsyncMock()
+    gateway.set_schedule = send  # type: ignore[method-assign]
+    assert api.can_set_schedule(SERIAL)
+    assert not api.can_set_schedule(OTHER)
+
+    await api.set_schedule(thermostat, [6, 0, 6], [(time(6), 2000), (time(22), 1800)])
+    send.assert_awaited_once_with(
+        SERIAL, frozenset({0, 6}), [(6 * 3600, 2000), (22 * 3600, 1800)]
+    )
+
+    send.reset_mock()
+    for days, events, error in (
+        ([0], [(time(6), 4050)], "between 5 and 40 °C"),
+        ([0], [(time(6), 450)], "between 5 and 40 °C"),
+        ([0], [(time(6, 10), 2000)], "06:10: times must be on a quarter"),
+        ([0], [(time(6, 0, 0, 1), 2000)], "06:00: times must be on a quarter"),
+        ([0], [(time(6), 2000), (time(5), 2000)], "must be in order"),
+        ([0], [], "between 1 and 6 events"),
+        ([], [(time(6), 2000)], "0 for Monday"),
+    ):
+        with pytest.raises(OJMicrolineScheduleError, match=error):
+            await api.set_schedule(thermostat, days, events)
+    send.assert_not_awaited()
+
+    # The thermostat has to be connected to the gateway.
+    with pytest.raises(OJMicrolineError, match="connected to the gateway"):
+        await api.set_schedule(thermostats[OTHER], [0], [(time(6), 2000)])
+    send.assert_not_awaited()
+
+    # An error of the gateway reaches the caller.
+    send.side_effect = OJMicrolineConnectionError("disconnected")
+    with pytest.raises(OJMicrolineConnectionError, match="disconnected"):
+        await api.set_schedule(thermostat, [0], [(time(6), 2000)])

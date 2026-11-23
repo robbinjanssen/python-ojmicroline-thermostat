@@ -16,6 +16,7 @@ from ojmicroline_thermostat.gateway.protobuf import (
     encode_varint,
     read_varint,
     set_field,
+    set_repeated,
     split_frames,
 )
 
@@ -210,3 +211,38 @@ def test_split_frames_rejects_bad_frames(data: bytes) -> None:
     """Only complete frames are accepted."""
     with pytest.raises(ValueError, match=r"frame|varint"):
         split_frames(data)
+
+
+def test_set_repeated_replaces_every_occurrence() -> None:
+    """Each occurrence gets its own value, and the other fields stay."""
+    data = (
+        encode_field(1, 5)
+        + encode_field(2, b"a")
+        + encode_field(3, 7)
+        + encode_field(2, b"b")
+    )
+    assert set_repeated(data, 2, [b"x", b"yz"]) == (
+        encode_field(1, 5)
+        + encode_field(2, b"x")
+        + encode_field(3, 7)
+        + encode_field(2, b"yz")
+    )
+
+
+def test_set_repeated_keeps_unchanged_occurrences() -> None:
+    """An occurrence that keeps its value keeps its bytes, however encoded."""
+    # 5 as a varint of two bytes, which encode_field would write in one.
+    unusual = b"\x08\x85\x00"
+    data = unusual + encode_field(1, 6)
+    assert set_repeated(data, 1, [5, 6]) == data
+    assert set_repeated(data, 1, [5, 9]) == unusual + encode_field(1, 9)
+
+
+@pytest.mark.parametrize("values", [[], [b"x"], [b"x", b"y", b"z"]])
+def test_set_repeated_needs_a_value_for_every_occurrence(
+    values: list[int | bytes],
+) -> None:
+    """There has to be exactly one value per occurrence."""
+    data = encode_field(2, b"a") + encode_field(2, b"b")
+    with pytest.raises(ValueError, match="does not occur"):
+        set_repeated(data, 2, values)
