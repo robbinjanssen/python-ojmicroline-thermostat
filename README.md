@@ -280,7 +280,9 @@ thermostat. Notifications are queued per session, so the listener receives
 every thermostat once when the subscription starts and again whenever the
 client has to log in again.
 
-### Local gateway (WG4 and WD5, experimental)
+<a name="local-gateway-wg4-and-wd5-experimental"></a>
+
+### Local gateway (WG4 and WD5)
 
 A thermostat keeps a connection open to OJ's device gateway and does not check
 that gateway's certificate. If a DNS record on your network points the
@@ -293,16 +295,19 @@ reads and sets the thermostat without the cloud.
 | WG4 | `na-thermos.ojelectronics.com` (`WG4_NORTH_AMERICA`) | 9533 | `WG4Gateway` | `WG4LocalAPI` |
 | WD5 | `owd5-r1099-thermostat.ojelectronics.com` for the SWATT app (`WD5_R1099`), `owd5-sl003-thermostat.ojelectronics.com` for Schlüter in Europe (`WD5_SL003`), `owd5-oj001-thermostat.ojelectronics.com` for the OJ Microline app (`WD5_OJ001`) | 9513 | `WD5Gateway` | `WD5LocalAPI` |
 
-This is experimental. The WG4 gateway has run against four real thermostats
-of two users.
+This is what the gateway has run against so far. The WG4 gateway has run
+against four real thermostats of two users.
 The connection, the relay, recording the profile, answering the thermostat
 locally and falling back to that while OJ's gateway was unreachable worked.
 In the first test the thermostat acknowledged commands too late; in the
 second it acknowledged all of them in time, and why they differed is not
-known. The WD5 gateway has run against OWD5 thermostats of three testers,
-with the relay and in local mode: the connection, the relay and commands of
-the gateway worked. A thermostat's Wi-Fi can be asleep for up to about half a
-minute, so a command may take that long.
+known. The WD5 gateway has run against OWD5 thermostats of four testers,
+with firmware 1013W213 and 1013W220, with the relay and in local mode: the
+connection, the relay, commands of the gateway and falling back to local
+while OJ's gateway was unreachable worked. A thermostat's Wi-Fi can be asleep
+for up to about half a minute, so a command may take that long. Schlüter
+thermostats in North America and the other models of both series have not
+been tried.
 
 The gateway has two modes:
 

@@ -90,9 +90,10 @@ work on a branch.
   thermostat. The WG4 gateway has run against four thermostats of two
   users: on the first one its commands were acknowledged too late in one
   test and in time in the next, for a reason that is not known. The WD5
-  gateway has run against OWD5 thermostats of
-  three testers, with the relay and in local mode. Do not present either as
-  verified.
+  gateway has run against OWD5 thermostats of four testers, with the relay
+  and in local mode. Neither is called experimental any more, which was the
+  maintainer's choice. The README tells what the gateway ran against and
+  what was never tried; do not present more than that as verified.
   - `DeviceGateway` knows no field of a series besides the sequence number
     and the acknowledgement. What differs per series goes into the hooks of
     its subclass, not into a check on the series.
