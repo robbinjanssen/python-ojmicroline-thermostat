@@ -333,6 +333,29 @@ waits 40 seconds for the acknowledgement. When it takes longer, the call fails
 with `OJMicrolineTimeoutError`, but when the acknowledgement still comes, the
 new state is reported like any other change.
 
+A WG4 thermostat on the gateway also reports its weekly schedule, which
+`Thermostat.schedule` holds in the form of the WD5 API, Monday first. The
+cloud API gives the same schedule for a WG4 thermostat that is not on the
+gateway. `WG4LocalAPI.set_schedule()` changes the events of one or more days
+of a thermostat that is connected to the gateway, also while it is relayed:
+
+```python
+from datetime import time
+
+# Weekdays 6:00 at 21 °C and 22:30 at 17 °C; days are 0 (Monday) to 6.
+await api.set_schedule(thermostat, range(5), [(time(6), 2100), (time(22, 30), 1700)])
+```
+
+A day has one to six events, on quarters of an hour and in order before
+midnight, within the limits of the thermostat; `OJMicrolineScheduleError` says
+what does not fit. The thermostat acknowledges a schedule without telling
+whether it kept it, so the gateway makes it connect anew and compares the
+upload that follows. That takes up to a minute and a half, during which the
+thermostat is offline for a moment. When the upload does not come,
+`OJMicrolineUnconfirmedError` tells that the schedule may or may not have
+been kept. This follows what one user reported for one thermostat; this
+library has not run it against a real thermostat yet.
+
 ```python
 import asyncio
 import json

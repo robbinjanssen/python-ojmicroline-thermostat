@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
 VARINT = 0
 FIXED64 = 1
@@ -236,6 +236,47 @@ def set_field(data: bytes, number: int, value: int | bytes) -> bytes:
         chunks.append(data[start:end])
     if not placed:
         chunks.append(encoded)
+    return b"".join(chunks)
+
+
+def set_repeated(data: bytes, number: int, values: Sequence[int | bytes]) -> bytes:
+    """Return an encoded message with every occurrence of a field replaced.
+
+    The occurrences are replaced in the order they were sent, one value each.
+    An occurrence whose value does not change keeps its bytes, as does every
+    other field.
+
+    Args:
+    ----
+        data: The encoded message.
+        number: The number of the repeated field.
+        values: The new value of each occurrence: a number for a varint
+            field, or bytes for a length-delimited one.
+
+    Returns:
+    -------
+        The encoded message with the occurrences replaced.
+
+    Raises:
+    ------
+        ValueError: The data is not a well-formed message, or the field does
+            not occur as often as there are values.
+
+    """
+    spans = list(_scan(data))
+    if sum(field.number == number for field, _, _ in spans) != len(values):
+        msg = f"Field {number} does not occur {len(values)} times"
+        raise ValueError(msg)
+    remaining = iter(values)
+    chunks: list[bytes] = []
+    for field, start, end in spans:
+        if field.number != number:
+            chunks.append(data[start:end])
+            continue
+        value = next(remaining)
+        chunks.append(
+            data[start:end] if value == field.value else encode_field(number, value)
+        )
     return b"".join(chunks)
 
 

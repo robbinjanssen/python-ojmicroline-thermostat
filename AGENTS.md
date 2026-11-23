@@ -162,6 +162,16 @@ work on a branch.
     temperature is `None`.
   - The history is written in UTC. A command that timed out or was refused
     is also logged as a warning, so it shows without debug logging.
+  - The WG4 schedule (field 8) is reported as `Schedules` of the cloud API,
+    and only when it has seven days of six events; one that is not
+    understood is left out, never refused, and passed back as it came. A
+    schedule command changes only the days asked for (`set_repeated()`
+    keeps the bytes of everything else). An acknowledgement does not prove
+    the thermostat kept a schedule: `WG4Gateway.set_schedule()` closes the
+    connection and compares the upload of the next one
+    (`READBACK_TIMEOUT`), and raises `OJMicrolineUnconfirmedError` when it
+    does not come. Temperatures of the schedule are in 1/100 °C on the
+    wire, unlike setpoints.
   - Whether a WD5 floor is heating is in 6.5 of the heartbeat, not in 6.4:
     seen next to a power meter. OJ's cloud counts the energy usage from the
     reports it gets, as minutes of heating times the load. `on_usage` tells
@@ -180,8 +190,9 @@ work on a branch.
 - The gateway tests run a fake thermostat and a fake OJ gateway
   (`tests/gateway_fakes.py`) against a real `WG4Gateway`, over TLS on the
   loopback interface. `trustme` creates the certificates, as the hooks reject
-  a committed private key. Timeouts are module constants in `gateway/server.py`
-  and `local.py`; shorten them with `monkeypatch` instead of sleeping.
+  a committed private key. Timeouts are module constants in `gateway/server.py`,
+  `gateway/wg4_gateway.py` (`READBACK_TIMEOUT`) and `local.py`; shorten them
+  with `monkeypatch` instead of sleeping.
 - `config.py` (gitignored) holds real credentials for `test_output.py`, a
   manual script. Never commit it, and never print credentials or tokens.
   `test_output.py`'s import order depends on whether `config.py` exists, which

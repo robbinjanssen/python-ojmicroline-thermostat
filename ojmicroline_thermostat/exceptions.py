@@ -43,3 +43,14 @@ class OJMicrolineTimeoutError(OJMicrolineError):
 
 class OJMicrolineUnauthorizedError(OJMicrolineError):
     """API rejected the session or access token (HTTP 401)."""
+
+
+class OJMicrolineScheduleError(OJMicrolineError):
+    """A schedule that was asked for does not fit the rules of the thermostat."""
+
+
+class OJMicrolineUnconfirmedError(OJMicrolineError):
+    """A thermostat accepted a change, but did not confirm that it kept it.
+
+    The change may well have been applied, so check before trying again.
+    """

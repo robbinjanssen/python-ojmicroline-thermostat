@@ -35,14 +35,24 @@ hold (9.5.1 its setpoint). The thermostat keeps both setpoints all the time
 and uses the one of the current mode. Device info 7.2 is the room name, and
 7.9 the setpoint the thermostat is aiming for right now, in any mode.
 
-Setpoints on the wire are in 1/200 °C, the floor temperature in 1/100 °C. This
-library uses 1/100 °C everywhere. Times are seconds since 2000-01-01 UTC.
+Schedule (field 8), as reported in issue 480 of the Home Assistant
+integration: 8.1 the time of the change and 8.2 the week, which has a day in
+every field 1. A day is 1 its number (1 Monday to 7 Sunday) and 2 an event,
+once per event. An event is 1 the clock (1 hour, 2 minute, 3 second), 2 the
+temperature and 3 whether it is active. The thermostat that was looked at has
+six events (slots) a day, which keep their place: an event that is switched
+off keeps its time and temperature.
+
+Setpoints on the wire are in 1/200 °C, the floor temperature and the
+temperatures of the schedule in 1/100 °C. This library uses 1/100 °C
+everywhere. Times are seconds since 2000-01-01 UTC.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from itertools import combinations
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from ojmicroline_thermostat.const import (
     REGULATION_COMFORT,
@@ -52,14 +62,19 @@ from ojmicroline_thermostat.const import (
 )
 
 from .protobuf import (
+    LENGTH_DELIMITED,
     SETPOINT_SCALE,
     Message,
     brief,
     encode_field,
     from_wire,
     set_field,
+    set_repeated,
     to_wire,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 FIELD_SEQUENCE = 1
 FIELD_KIND = 2
@@ -92,6 +107,24 @@ _TELEMETRY_FLOOR = 1
 _TELEMETRY_HEATING = 2
 # Field 5 is 1 on most messages in both directions; its meaning is not known.
 _FIELD_5 = 5
+
+# The schedule (field 8), its week, a day of the week, and an event of a day.
+_SCHEDULE_TIME = 1
+_SCHEDULE_WEEK = 2
+_WEEK_DAY = 1
+_DAY_NUMBER = 1
+_DAY_EVENT = 2
+_EVENT_CLOCK = 1
+_EVENT_TEMPERATURE = 2
+_EVENT_ACTIVE = 3
+# The fields of a clock: hour, minute and second.
+_CLOCK_FIELDS = (1, 2, 3)
+
+# The events a day of the schedule has, active or not.
+SCHEDULE_SLOTS = 6
+# The times of the events, in seconds since midnight, are quarters of an hour.
+SCHEDULE_STEP = 900
+_DAY = 86400
 
 # The field of the state that holds the setpoint of a mode, and the name of
 # that setpoint in the cloud API.
@@ -306,6 +339,431 @@ def command(sequence: int, state: bytes, schedule: bytes | None = None) -> bytes
     if schedule:
         message += encode_field(FIELD_SCHEDULE, schedule)
     return message + encode_field(FIELD_STATE, state)
+
+
+class _Slot(NamedTuple):
+    """An event of a day of the schedule, at its place in the day."""
+
+    seconds: int
+    temperature: int
+    active: bool
+
+
+def decode_schedule(schedule: bytes) -> list[dict[str, Any]]:
+    """Translate a schedule to the Schedules field of the cloud API.
+
+    Args:
+    ----
+        schedule: The schedule (field 8) of a thermostat.
+
+    Returns:
+    -------
+        Every day, Monday (WeekDayGrpNo 1) first, each with its six events:
+        ScheduleType the place of the event in the day, Clock its time as
+        HH:MM:SS, TempFloor its temperature in 1/100 °C and Active whether it
+        is switched on.
+
+    Raises:
+    ------
+        ValueError: The schedule is malformed, or does not have seven days
+            of six events each.
+
+    """
+    days = _read_days(_week(schedule))
+    return [
+        {
+            "WeekDayGrpNo": number,
+            "Events": [
+                {
+                    "ScheduleType": place,
+                    "Clock": _clock(slot.seconds),
+                    "TempFloor": slot.temperature,
+                    "Active": slot.active,
+                }
+                for place, slot in enumerate(days[number])
+            ],
+        }
+        for number in sorted(days)
+    ]
+
+
+def decode_schedule_fields(message: Message) -> dict[str, Any]:
+    """Translate the schedule of a message to the Schedules field of the cloud API.
+
+    A schedule that is not understood is left out rather than refused: the
+    gateway passes it back to the thermostat as it is, and the rest of the
+    message still counts.
+
+    Returns
+    -------
+        The Schedules field, see decode_schedule(); empty if the message has
+        no schedule, or one that is not understood.
+
+    """
+    schedule = message.data(FIELD_SCHEDULE)
+    if schedule is None:
+        return {}
+    try:
+        return {"Schedules": decode_schedule(schedule)}
+    except ValueError:
+        return {}
+
+
+def check_days(days: Iterable[int]) -> frozenset[int]:
+    """Check the days of the week to change in a schedule.
+
+    Args:
+    ----
+        days: The days, 0 for Monday to 6 for Sunday.
+
+    Returns:
+    -------
+        The days, each once.
+
+    Raises:
+    ------
+        ValueError: There is no day, or one that is not a day of the week.
+
+    """
+    chosen = frozenset(days)
+    if not chosen or not chosen <= set(range(7)):
+        msg = "Choose one or more days, 0 for Monday to 6 for Sunday."
+        raise ValueError(msg)
+    return chosen
+
+
+def check_events(
+    events: Sequence[tuple[int, int]],
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> None:
+    """Check the events of a day of the schedule.
+
+    Args:
+    ----
+        events: Each event as its time in seconds since midnight and its
+            temperature in 1/100 °C.
+        minimum: The lowest temperature the thermostat allows, if known.
+        maximum: The highest temperature the thermostat allows, if known.
+
+    Raises:
+    ------
+        ValueError: There are no events or more than six, a time is not on
+            a quarter of an hour or not after the one before it on the same
+            day, or a temperature is outside the limits.
+
+    """
+    if not 1 <= len(events) <= SCHEDULE_SLOTS:
+        msg = f"A day needs between 1 and {SCHEDULE_SLOTS} events."
+        raise ValueError(msg)
+    previous = -1
+    for seconds, temperature in events:
+        if not 0 <= seconds < _DAY or seconds % SCHEDULE_STEP:
+            msg = f"{_hours(seconds)}: times must be on a quarter of an hour."
+            raise ValueError(msg)
+        if seconds <= previous:
+            msg = (
+                f"{_hours(seconds)}: the events of a day must be in order, "
+                "and before midnight."
+            )
+            raise ValueError(msg)
+        previous = seconds
+        _check_temperature(temperature, minimum, maximum)
+
+
+def _check_temperature(
+    temperature: int, minimum: int | None, maximum: int | None
+) -> None:
+    """Check the temperature of an event against the limits that are known.
+
+    Raises
+    ------
+        ValueError: The temperature is outside the limits, or 0 °C or below.
+
+    """
+    if minimum is not None and maximum is not None:
+        limits = f"between {minimum / 100:g} and {maximum / 100:g} °C"
+        fits = minimum <= temperature <= maximum
+    elif minimum is not None:
+        limits = f"at least {minimum / 100:g} °C"
+        fits = temperature >= minimum
+    elif temperature <= 0:
+        limits = "above 0 °C"
+        fits = False
+    elif maximum is not None:
+        limits = f"at most {maximum / 100:g} °C"
+        fits = temperature <= maximum
+    else:
+        return
+    if not fits:
+        msg = f"{temperature / 100:g} °C: temperatures must be {limits}."
+        raise ValueError(msg)
+
+
+def changed_schedule(
+    schedule: bytes,
+    days: Iterable[int],
+    events: Sequence[tuple[int, int]],
+    moment: datetime | None = None,
+) -> bytes:
+    """Return a schedule with the events of some days replaced.
+
+    The events go into the places of a day in order, and the places that are
+    left over are switched off. The first event goes into the first place,
+    which the thermostat keeps active. The other places are chosen to change
+    as little as possible: an event that is already there keeps its place.
+
+    Only the fields that change are written. Every other byte, the other
+    days, and the time and temperature of a place that is switched off stay
+    as the thermostat sent them. The schedule gets a new time if anything
+    changed.
+
+    Args:
+    ----
+        schedule: The schedule (field 8) the thermostat sent last.
+        days: The days to change, 0 for Monday to 6 for Sunday.
+        events: The events each of those days gets, see check_events().
+        moment: The time of the change as a timezone-aware moment; now when
+            omitted.
+
+    Returns:
+    -------
+        The encoded schedule; the same bytes if nothing changes.
+
+    Raises:
+    ------
+        ValueError: The days or events are not valid, or the schedule is not
+            understood, see decode_schedule().
+
+    """
+    numbers = {day + 1 for day in check_days(days)}
+    check_events(events)
+    week = _week(schedule)
+    current = _read_days(week)
+    changed_days = []
+    for day in _contents(Message.parse(week), _WEEK_DAY):
+        number = Message.parse(day).varint(_DAY_NUMBER)
+        # _read_days() made sure every day has a number.
+        if number is None or number not in numbers:
+            changed_days.append(day)
+        else:
+            changed_days.append(_changed_day(day, current[number], events))
+    changed_week = set_repeated(week, _WEEK_DAY, changed_days)
+    if changed_week == week:
+        return schedule
+    changed = set_field(schedule, _SCHEDULE_WEEK, changed_week)
+    return set_field(changed, _SCHEDULE_TIME, device_time(moment))
+
+
+def schedule_command(
+    sequence: int,
+    state: bytes,
+    schedule: bytes,
+    moment: datetime | None = None,
+) -> bytes:
+    """Build the message that makes the thermostat take over a schedule.
+
+    The state goes along as the thermostat sent it, with the time of the
+    change: mode and setpoints stay as they are.
+
+    Args:
+    ----
+        sequence: The sequence number, which the thermostat acknowledges.
+        state: The state (field 9) the thermostat sent last.
+        schedule: The schedule to take over, see changed_schedule().
+        moment: The time of the change as a timezone-aware moment; now when
+            omitted.
+
+    Returns:
+    -------
+        The encoded message.
+
+    Raises:
+    ------
+        ValueError: The state is malformed.
+
+    """
+    return command(sequence, stamped_state(state, moment), schedule)
+
+
+def stamped_state(state: bytes, moment: datetime | None = None) -> bytes:
+    """Return the state of a thermostat with a new time of the change.
+
+    Raises
+    ------
+        ValueError: The state is malformed.
+
+    """
+    return set_field(state, _STATE_TIME, device_time(moment))
+
+
+def _week(schedule: bytes) -> bytes:
+    """Return the week of a schedule.
+
+    Raises
+    ------
+        ValueError: The schedule is malformed or has no week.
+
+    """
+    week = Message.parse(schedule).data(_SCHEDULE_WEEK)
+    if week is None:
+        msg = "The schedule has no week"
+        raise ValueError(msg)
+    return week
+
+
+def _contents(message: Message, number: int) -> list[bytes]:
+    """Return the content of every occurrence of a field that holds a message.
+
+    Raises
+    ------
+        ValueError: An occurrence does not hold a message.
+
+    """
+    contents = []
+    for field in message.fields:
+        if field.number != number:
+            continue
+        if field.wire_type != LENGTH_DELIMITED or not isinstance(field.value, bytes):
+            msg = f"Field {number} of the schedule does not hold a message"
+            raise ValueError(msg)
+        contents.append(field.value)
+    return contents
+
+
+def _read_days(week: bytes) -> dict[int, list[_Slot]]:
+    """Read the days of a week by their number, 1 for Monday to 7 for Sunday.
+
+    Raises
+    ------
+        ValueError: The week is malformed, or does not have seven days of six
+            events each.
+
+    """
+    days: dict[int, list[_Slot]] = {}
+    for day in _contents(Message.parse(week), _WEEK_DAY):
+        fields = Message.parse(day)
+        number = fields.varint(_DAY_NUMBER)
+        if number is None or not 1 <= number <= 7 or number in days:
+            msg = f"The schedule has a day numbered {number}"
+            raise ValueError(msg)
+        slots = [_read_slot(event) for event in _contents(fields, _DAY_EVENT)]
+        if len(slots) != SCHEDULE_SLOTS:
+            msg = f"A day of the schedule has {len(slots)} events"
+            raise ValueError(msg)
+        days[number] = slots
+    if len(days) != 7:
+        msg = f"The schedule has {len(days)} days"
+        raise ValueError(msg)
+    return days
+
+
+def _read_slot(event: bytes) -> _Slot:
+    """Read an event of a day.
+
+    The thermostat writes every field, also one that is 0; a field that is
+    left out counts as 0 all the same, as protobuf has it.
+
+    Raises
+    ------
+        ValueError: The event is malformed.
+
+    """
+    fields = Message.parse(event)
+    clock_data = fields.data(_EVENT_CLOCK)
+    if clock_data is None:
+        msg = "An event of the schedule has no time"
+        raise ValueError(msg)
+    clock = Message.parse(clock_data)
+    hour, minute, second = (clock.varint(number) or 0 for number in _CLOCK_FIELDS)
+    temperature = fields.varint(_EVENT_TEMPERATURE) or 0
+    active = fields.varint(_EVENT_ACTIVE) or 0
+    if hour >= 24 or minute >= 60 or second >= 60 or active > 1:
+        msg = "An event of the schedule is not understood"
+        raise ValueError(msg)
+    return _Slot(hour * 3600 + minute * 60 + second, temperature, bool(active))
+
+
+def _places(slots: list[_Slot], events: Sequence[tuple[int, int]]) -> tuple[int, ...]:
+    """Choose the places of a day that the events go into, in order.
+
+    The first event goes into the first place. Of the ways to place the
+    others, the one that changes least wins: a place with the same time
+    counts most, then one that is active, then one with the same temperature.
+    """
+
+    def score(places: tuple[int, ...]) -> int:
+        return sum(
+            4 * (slots[place].seconds == seconds)
+            + 2 * slots[place].active
+            + (slots[place].temperature == temperature)
+            for place, (seconds, temperature) in zip(places, events, strict=True)
+        )
+
+    return max(
+        ((0, *rest) for rest in combinations(range(1, len(slots)), len(events) - 1)),
+        key=score,
+    )
+
+
+def _changed_day(
+    day: bytes, slots: list[_Slot], events: Sequence[tuple[int, int]]
+) -> bytes:
+    """Return a day of the schedule with other events, see changed_schedule()."""
+    places = dict(zip(_places(slots, events), events, strict=True))
+    changed_events = [
+        _changed_event(event, active=place in places, at=places.get(place))
+        for place, event in enumerate(_contents(Message.parse(day), _DAY_EVENT))
+    ]
+    return set_repeated(day, _DAY_EVENT, changed_events)
+
+
+def _changed_event(
+    event: bytes, *, active: bool, at: tuple[int, int] | None = None
+) -> bytes:
+    """Return an event switched on or off, and at another time and temperature.
+
+    Only a field that changes is written.
+
+    Args:
+    ----
+        event: The encoded event.
+        active: Whether the event is switched on.
+        at: The new time in seconds since midnight and the new temperature in
+            1/100 °C; None keeps both.
+
+    Returns:
+    -------
+        The encoded event.
+
+    """
+    fields = Message.parse(event)
+    if at is not None:
+        seconds, temperature = at
+        clock = fields.data(_EVENT_CLOCK) or b""
+        current = Message.parse(clock)
+        changed_clock = clock
+        values = (seconds // 3600, seconds % 3600 // 60, seconds % 60)
+        for number, value in zip(_CLOCK_FIELDS, values, strict=True):
+            if (current.varint(number) or 0) != value:
+                changed_clock = set_field(changed_clock, number, value)
+        if changed_clock != clock:
+            event = set_field(event, _EVENT_CLOCK, changed_clock)
+        if (fields.varint(_EVENT_TEMPERATURE) or 0) != temperature:
+            event = set_field(event, _EVENT_TEMPERATURE, temperature)
+    if bool(fields.varint(_EVENT_ACTIVE)) != active:
+        event = set_field(event, _EVENT_ACTIVE, int(active))
+    return event
+
+
+def _clock(seconds: int) -> str:
+    """Show a time of the schedule as HH:MM:SS."""
+    return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+
+def _hours(seconds: int) -> str:
+    """Show a time of the schedule as HH:MM, for a message to a user."""
+    return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}"
 
 
 def response_field(message: Message) -> int | None:

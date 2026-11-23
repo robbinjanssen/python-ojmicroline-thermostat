@@ -6,8 +6,10 @@ from .exceptions import (
     OJMicrolineError,
     OJMicrolineHTTPError,
     OJMicrolineResultsError,
+    OJMicrolineScheduleError,
     OJMicrolineTimeoutError,
     OJMicrolineUnauthorizedError,
+    OJMicrolineUnconfirmedError,
 )
 from .gateway import (
     WD5_OJ001,
@@ -50,8 +52,10 @@ __all__ = [
     "OJMicrolineError",
     "OJMicrolineHTTPError",
     "OJMicrolineResultsError",
+    "OJMicrolineScheduleError",
     "OJMicrolineTimeoutError",
     "OJMicrolineUnauthorizedError",
+    "OJMicrolineUnconfirmedError",
     "Thermostat",
     "UpstreamStatus",
     "WD5Gateway",

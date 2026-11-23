@@ -24,7 +24,12 @@ from ojmicroline_thermostat.gateway import (
 )
 from ojmicroline_thermostat.gateway import server as gateway_server
 from ojmicroline_thermostat.gateway.protobuf import Message, encode_field, encode_frame
-from ojmicroline_thermostat.gateway.wg4 import changed_state, command
+from ojmicroline_thermostat.gateway.wg4 import (
+    changed_schedule,
+    changed_state,
+    command,
+    decode_schedule,
+)
 
 from .gateway_fakes import (
     CLOUD_PROFILE,
@@ -40,6 +45,7 @@ from .gateway_fakes import (
     FakeThermostat,
     acknowledgement,
     login,
+    schedule_wire,
     until,
 )
 from .test_gateway_wg4 import TELEMETRY
@@ -998,3 +1004,44 @@ async def test_listeners_of_the_relay_may_fail(
     assert (await thermostat.receive()).varint(1) == 403
     assert gateway.profiles == {SERIAL: CLOUD_PROFILE}
     assert caplog.text.count("Error in a listener of the gateway") == 2
+
+
+async def test_schedule_starts_from_what_ojs_gateway_has_under_way(
+    gateway: WG4Gateway, cloud: FakeCloud, connect: Callable[[], Any]
+) -> None:
+    """A schedule keeps a change of the app that is still on its way.
+
+    The upload that confirms the schedule reaches OJ's gateway as well.
+    """
+    thermostat: FakeThermostat = await connect()
+    await thermostat.login()
+    await thermostat.upload(schedule_wire())
+
+    # The app changes Monday, which the thermostat has not answered yet when
+    # the gateway changes Sunday.
+    from_the_app = changed_schedule(schedule_wire(), [0], [(5 * 3600, 2222)])
+    await cloud.send(command(7, STATE, from_the_app))
+    await thermostat.receive_frame()
+    task = asyncio.create_task(
+        gateway.set_schedule(SERIAL, [6], [(6 * 3600, 2000), (22 * 3600, 1800)])
+    )
+    sent = await thermostat.receive()
+    schedule = sent.data(8)
+    assert schedule is not None
+    days = decode_schedule(schedule)
+    assert days[0] == decode_schedule(from_the_app)[0]
+    assert [event["Clock"] for event in days[6]["Events"] if event["Active"]] == [
+        "06:00:00",
+        "22:00:00",
+    ]
+    await thermostat.send(acknowledgement(7))
+    await thermostat.send(acknowledgement(sent.varint(1) or 0))
+    assert await thermostat.was_closed()
+
+    # The thermostat connects anew, relayed, and uploads what it kept.
+    again: FakeThermostat = await connect()
+    await again.login()
+    await again.upload(schedule)
+    await task
+    assert cloud.connections == 2
+    assert any(message.data(8) == schedule for message in cloud.received)

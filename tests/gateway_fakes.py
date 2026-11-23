@@ -15,7 +15,13 @@ from typing import TYPE_CHECKING, Any
 import trustme
 
 from ojmicroline_thermostat.gateway import WG4_NORTH_AMERICA, DeviceProfile
-from ojmicroline_thermostat.gateway.protobuf import Message, encode_field, encode_frame
+from ojmicroline_thermostat.gateway.protobuf import (
+    FIXED32,
+    Message,
+    encode_field,
+    encode_frame,
+    encode_varint,
+)
 from ojmicroline_thermostat.gateway.server import read_frame
 from ojmicroline_thermostat.gateway.wg4 import login_acknowledgement
 
@@ -57,14 +63,73 @@ STATE = (
 )
 SCHEDULE = b"\x08\x01"
 SCHEDULE_UPLOAD = encode_field(1, 30) + encode_field(2, 6)
-STATE_UPLOAD = (
-    encode_field(1, 31)
-    + encode_field(2, 4)
-    + encode_field(5, 1)
-    + encode_field(7, encode_field(2, b"Kitchen Floor"))
-    + encode_field(8, SCHEDULE)
-    + encode_field(9, STATE)
-)
+
+# The places of the events of a day in schedule_wire(): their hours, and which
+# are active.
+SCHEDULE_HOURS = (6, 9, 12, 14, 18, 22)
+SCHEDULE_ACTIVE = (0, 1, 4, 5)
+
+
+def schedule_event(
+    hour: int, temperature: int, *, active: bool, minute: int = 0
+) -> bytes:
+    """Build an event of a day, with a field this library does not know."""
+    clock = (
+        encode_field(1, hour)
+        + encode_field(2, minute)
+        + encode_field(3, 0)
+        # A fixed-width field, which has to come back byte for byte.
+        + encode_varint(10 << 3 | FIXED32)
+        + b"abcd"
+    )
+    return (
+        encode_field(1, clock)
+        + encode_field(2, temperature)
+        + encode_field(3, int(active))
+        + encode_field(11, b"unknown event")
+    )
+
+
+def schedule_wire(moment: int = 700_000_000) -> bytes:
+    """Build a schedule like the reported one, with made-up values.
+
+    Seven days, Monday (1) first, of six events each, on every whole field
+    that the thermostat writes, including those that are 0. Every day has its
+    own temperatures, 17.10 °C and up: day * 10 + place above 17 °C. Fields
+    that this library does not know sit at every level.
+    """
+    days = []
+    for day in range(1, 8):
+        events = b"".join(
+            encode_field(
+                2,
+                schedule_event(
+                    hour, 1700 + day * 10 + place, active=place in SCHEDULE_ACTIVE
+                ),
+            )
+            for place, hour in enumerate(SCHEDULE_HOURS)
+        )
+        days.append(encode_field(1, encode_field(1, day) + events + encode_field(9, 5)))
+    return (
+        encode_field(1, moment)
+        + encode_field(2, b"".join(days) + encode_field(7, 1))
+        + encode_field(9, 77)
+    )
+
+
+def state_upload(schedule: bytes = SCHEDULE) -> bytes:
+    """Build the full upload after a login, with a schedule."""
+    return (
+        encode_field(1, 31)
+        + encode_field(2, 4)
+        + encode_field(5, 1)
+        + encode_field(7, encode_field(2, b"Kitchen Floor"))
+        + encode_field(8, schedule)
+        + encode_field(9, STATE)
+    )
+
+
+STATE_UPLOAD = state_upload()
 # What the gateway reports after the full upload.
 UPLOADED = {
     "RegulationMode": 3,
@@ -167,14 +232,14 @@ class FakeThermostat:
         await self.send(login(serial))
         return await self.receive()
 
-    async def upload(self) -> list[bytes]:
+    async def upload(self, schedule: bytes = SCHEDULE) -> list[bytes]:
         """Upload the schedule and the state, as a thermostat does after login.
 
         Returns the four frames that answer the two uploads.
         """
         await self.send(SCHEDULE_UPLOAD)
         answers = [await self.receive_frame(), await self.receive_frame()]
-        await self.send(STATE_UPLOAD)
+        await self.send(state_upload(schedule))
         return [*answers, await self.receive_frame(), await self.receive_frame()]
 
     async def was_closed(self) -> bool:
