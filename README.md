@@ -314,9 +314,18 @@ The gateway has two modes:
 A WG4 thermostat needs a profile before it can be answered locally, so start
 in relay mode. A WD5 thermostat needs none. The gateway sets the schedule and
 manual modes of a WG4 thermostat, and the schedule, comfort, manual, boost,
-eco and frost protection modes of a WD5 thermostat. Other modes and the
-energy usage still go through the cloud API, which only reaches a thermostat
-that is relayed.
+eco and frost protection modes of a WD5 thermostat. Other modes still go
+through the cloud API, which only reaches a thermostat that is relayed.
+
+The energy usage comes from the cloud API too, which counts it from the
+reports of a thermostat that OJ's gateway gets. What a thermostat uses while
+OJ's gateway does not get its reports, in local mode or while OJ's gateway is
+unreachable, is yours to add up: pass `on_usage=` to the API, which is called
+with the serial number and the kWh since the previous report. That is the
+time since that report times the load of the thermostat, as the cloud counts
+it. A power meter confirmed the cloud's count on an OWD5 thermostat; what
+`on_usage` reports has not been compared with a meter yet, and for a WG4
+thermostat neither has.
 
 The Wi-Fi of a thermostat can take nothing in for up to about 30 seconds
 while it saves power, so a command may take that long to arrive. The gateway
@@ -405,6 +414,13 @@ of the thermostats that connected to the gateway (`known`).
 - Pass the known serial numbers in again after a restart (`known=`). In local
   mode a thermostat that connected before does not reach the cloud, which
   the API cannot tell otherwise until the thermostat has connected again.
+- With `on_usage=`, the energy the cloud does not count is yours to add up
+  and to keep. Nothing is reported for a thermostat whose load is not known:
+  a WD5 thermostat tells it after it logged in, and for a WG4 thermostat it
+  comes from the cloud API. `load()` returns it. The load a thermostat knows
+  can be a few percent off what its heating draws; `set_load()` counts with
+  a load of your own, which you have to store and set again after a
+  restart.
 
 Notifications come from the thermostats on the gateway only. A thermostat
 that the cloud API serves, or a change made in the vendor's app while a

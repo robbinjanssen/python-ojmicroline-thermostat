@@ -249,6 +249,12 @@ These need a real thermostat to answer.
   does, local mode repeats old settings at every reconnect.
 - Do firmware updates use this connection?
 - Which gateway host do thermostats of other brands and regions connect to?
+- How does OJ's cloud count the energy usage of a WG4 thermostat? For the WD5
+  series it is the minutes of heating times the load, see
+  [WD5 series](#wd5-series). The library counts the reports of a WG4
+  thermostat that OJ's gateway does not get the same way, with the load the
+  cloud API tells. That has not been compared with the cloud or with a
+  power meter.
 
 ## Not decoded yet
 
@@ -310,7 +316,9 @@ Seen:
   6.68 kWh, where the power meter of the house measured about 6.7 kWh above
   the base load. The cloud appears to count the heartbeats in which the
   floor is heating; that was not seen. The floor itself drew between 3.9 and
-  4.1 kW, with the mains voltage.
+  4.1 kW, with the mains voltage. The library counts the heartbeats that
+  OJ's gateway does not get the same way, with the time between two
+  heartbeats for the minute (`on_usage` of the API).
 
 ### Where the thermostat connects
 

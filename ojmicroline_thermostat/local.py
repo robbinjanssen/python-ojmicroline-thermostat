@@ -7,6 +7,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from http import HTTPStatus
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from .exceptions import (
@@ -38,6 +39,17 @@ CLOUD_TIMEOUT = 10.0
 Snapshot = dict[str, dict[str, Any]]
 # Called with a new snapshot, for the caller to store.
 SnapshotListener = Callable[[Snapshot], None]
+
+# Called with a serial number and the energy in kWh that the thermostat used
+# since its previous report, for the caller to add up.
+UsageListener = Callable[[str, float], None]
+
+# How long a report counts for when the one before it is not known, or is too
+# long ago to tell what the thermostat did in between. A thermostat reports
+# once a minute.
+REPORT_INTERVAL = 60.0
+# The longest time between two reports that counts in full.
+MAX_REPORT_INTERVAL = 120.0
 
 # The fields of the thermostat JSON that change by themselves in every series.
 # A snapshot that only differs in those is not worth storing again.
@@ -101,7 +113,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
     # not show in the vendor's app.
     cloud_first: bool = False
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 # pylint: disable=too-many-arguments
         self,
         cloud: _CloudT,
         gateway: _GatewayT,
@@ -109,6 +121,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         snapshot: Mapping[str, Mapping[str, Any]] | None = None,
         on_snapshot: SnapshotListener | None = None,
         known: Iterable[str] = (),
+        on_usage: UsageListener | None = None,
     ) -> None:
         """Create a new instance of the API object.
 
@@ -124,6 +137,14 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
                 the gateway before, see the property known. Without them, a
                 thermostat that only the gateway reaches is taken for one
                 that the cloud reaches, until it connects again.
+            on_usage: Called with a serial number and the energy in kWh that
+                the thermostat used since its previous report, for every
+                report that OJ's gateway does not get: in local mode, and in
+                relay mode while OJ's gateway is unreachable. The cloud API
+                does not count that energy, so add it to what
+                get_energy_usage() returns. It is 0 for a thermostat that is
+                not heating, and nothing is reported for a thermostat whose
+                load is not known; see load() and set_load().
 
         """
         self.cloud = cloud
@@ -133,6 +154,11 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         self.cloud_error: OJMicrolineError | None = None
         self._gateway = gateway
         self._on_snapshot = on_snapshot
+        self._on_usage = on_usage
+        # When each thermostat last told whether it is heating (monotonic).
+        self._reported_at: dict[str, float] = {}
+        # The loads in W to count with in the place of a thermostat's own.
+        self._loads: dict[str, int] = {}
         self._snapshot: Snapshot = {
             serial: dict(data) for serial, data in (snapshot or {}).items()
         }
@@ -401,6 +427,35 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         """
         return frozenset(self._known)
 
+    def load(self, serial: str) -> int | None:
+        """Return the load in W that the usage of a thermostat is counted with.
+
+        That is the load set with set_load(), and otherwise the load of the
+        thermostat's heating: a WD5 thermostat tells it after it logged in,
+        and for a WG4 thermostat it comes from the cloud API. None if it is
+        not known.
+        """
+        return self._loads.get(serial) or self._load(serial)
+
+    def set_load(self, serial: str, load: int | None) -> None:
+        """Count the usage of a thermostat with another load than its own.
+
+        The load a thermostat knows was entered at its installation or
+        measured by it, and its heating may draw something else. This only
+        changes what on_usage reports: the cloud API counts with the load
+        of the thermostat.
+
+        Args:
+        ----
+            serial: The serial number of the thermostat.
+            load: The load in W; None or 0 to count with the thermostat's own.
+
+        """
+        if load:
+            self._loads[serial] = load
+        else:
+            self._loads.pop(serial, None)
+
     def cloud_reaches(self, serial: str) -> bool:
         """Tell whether a change through the cloud API reaches a thermostat.
 
@@ -452,6 +507,10 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
     ) -> None:
         """Send one of the local modes to a thermostat on the gateway."""
 
+    @abstractmethod
+    def _load(self, serial: str) -> int | None:
+        """Return the load of a thermostat's heating in W, if it is known."""
+
     def _known_locally(self, serial: str) -> bool:
         """Tell whether a thermostat was served by the gateway before."""
         return serial in self._known
@@ -462,8 +521,32 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         """Keep what a thermostat on the gateway reports."""
         self._known.add(serial)
         self._live.setdefault(serial, {}).update(fields)
+        if "Heating" in fields:
+            self._count(serial, heating=bool(fields["Heating"]))
         self._changed.add(serial)
         self._wake.set()
+
+    def _count(self, serial: str, *, heating: bool) -> None:
+        """Tell the caller what a thermostat used since its previous report.
+
+        A thermostat switches its load fully on or off, and tells about once
+        a minute whether it is on. OJ's cloud counts the energy usage from
+        those reports: a whole number of minutes times the load, which a
+        power meter confirmed on an OWD5. A report that OJ's gateway gets is
+        counted there. One that it does not get is counted here.
+        """
+        now = monotonic()
+        previous = self._reported_at.get(serial)
+        self._reported_at[serial] = now
+        if self._on_usage is None or self._gateway.is_relayed(serial):
+            return
+        load = self.load(serial)
+        if not load:
+            return
+        seconds = REPORT_INTERVAL
+        if previous is not None and now - previous <= MAX_REPORT_INTERVAL:
+            seconds = now - previous
+        self._on_usage(serial, load * seconds / 3_600_000 if heating else 0.0)
 
     def _thermostat(self, serial: str) -> Thermostat:
         """Build a thermostat from the snapshot and what it reported itself."""

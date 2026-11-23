@@ -784,3 +784,20 @@ async def test_energy_price_is_remembered(
     assert await api.set_energy_price(thermostat, 0.31)
     assert len(stored) == 1
     aresponses.assert_plan_strictly_followed()
+
+
+async def test_usage_is_counted_with_the_load_of_the_cloud(
+    cloud: WG4API, gateway: WG4Gateway
+) -> None:
+    """A WG4 thermostat is counted with the load the cloud API tells."""
+    used: list[tuple[str, float]] = []
+    WG4LocalAPI(
+        cloud,
+        gateway,
+        snapshot=_snapshot(),
+        on_usage=lambda serial, energy: used.append((serial, energy)),
+    )
+
+    # The fixture has a measured load of 1218 W for this thermostat.
+    _report(gateway, SERIAL, Online=True, Temperature=2100, Heating=True)
+    assert used == [(SERIAL, pytest.approx(1218 * 60 / 3_600_000))]

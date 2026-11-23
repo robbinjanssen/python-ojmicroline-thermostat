@@ -8,6 +8,7 @@ from .const import REGULATION_MANUAL, REGULATION_SCHEDULE
 from .gateway import WG4Gateway
 from .local import VOLATILE_FIELDS, LocalAPI
 from .models import Thermostat
+from .models.thermostat import parse_wg4_load
 from .wg4 import WG4API
 
 # The regulation modes the gateway can set by itself.
@@ -79,6 +80,11 @@ class WG4LocalAPI(LocalAPI[WG4API, WG4Gateway]):
 
     def _parse(self, data: dict[str, Any]) -> Thermostat:
         return Thermostat.from_wg4_json(data)
+
+    def _load(self, serial: str) -> int | None:
+        # The cloud API tells the load, measured or set at installation.
+        known = {**self._snapshot.get(serial, {}), **self._live.get(serial, {})}
+        return parse_wg4_load(known)
 
     async def _set_on_gateway(
         self,
