@@ -417,7 +417,10 @@ of the thermostats that connected to the gateway (`known`).
 - With `on_usage=`, the energy the cloud does not count is yours to add up
   and to keep. Nothing is reported for a thermostat whose load is not known:
   a WD5 thermostat tells it after it logged in, and for a WG4 thermostat it
-  comes from the cloud API.
+  comes from the cloud API. `load()` returns it. The load a thermostat knows
+  can be a few percent off what its heating draws; `set_load()` counts with
+  a load of your own, which you have to store and set again after a
+  restart.
 
 Notifications come from the thermostats on the gateway only. A thermostat
 that the cloud API serves, or a change made in the vendor's app while a

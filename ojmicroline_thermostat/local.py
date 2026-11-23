@@ -144,7 +144,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
                 does not count that energy, so add it to what
                 get_energy_usage() returns. It is 0 for a thermostat that is
                 not heating, and nothing is reported for a thermostat whose
-                load is not known.
+                load is not known; see load() and set_load().
 
         """
         self.cloud = cloud
@@ -157,6 +157,8 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         self._on_usage = on_usage
         # When each thermostat last told whether it is heating (monotonic).
         self._reported_at: dict[str, float] = {}
+        # The loads in W to count with in the place of a thermostat's own.
+        self._loads: dict[str, int] = {}
         self._snapshot: Snapshot = {
             serial: dict(data) for serial, data in (snapshot or {}).items()
         }
@@ -425,6 +427,35 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         """
         return frozenset(self._known)
 
+    def load(self, serial: str) -> int | None:
+        """Return the load in W that the usage of a thermostat is counted with.
+
+        That is the load set with set_load(), and otherwise the load of the
+        thermostat's heating: a WD5 thermostat tells it after it logged in,
+        and for a WG4 thermostat it comes from the cloud API. None if it is
+        not known.
+        """
+        return self._loads.get(serial) or self._load(serial)
+
+    def set_load(self, serial: str, load: int | None) -> None:
+        """Count the usage of a thermostat with another load than its own.
+
+        The load a thermostat knows was entered at its installation or
+        measured by it, and its heating may draw something else. This only
+        changes what on_usage reports: the cloud API counts with the load
+        of the thermostat.
+
+        Args:
+        ----
+            serial: The serial number of the thermostat.
+            load: The load in W; None or 0 to count with the thermostat's own.
+
+        """
+        if load:
+            self._loads[serial] = load
+        else:
+            self._loads.pop(serial, None)
+
     def cloud_reaches(self, serial: str) -> bool:
         """Tell whether a change through the cloud API reaches a thermostat.
 
@@ -509,7 +540,7 @@ class LocalAPI(ABC, Generic[_CloudT, _GatewayT]):
         self._reported_at[serial] = now
         if self._on_usage is None or self._gateway.is_relayed(serial):
             return
-        load = self._load(serial)
+        load = self.load(serial)
         if not load:
             return
         seconds = REPORT_INTERVAL

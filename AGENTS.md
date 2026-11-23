@@ -166,7 +166,9 @@ work on a branch.
     seen next to a power meter. OJ's cloud counts the energy usage from the
     reports it gets, as minutes of heating times the load. `on_usage` tells
     what the reports are worth that OJ's gateway does not get
-    (`LocalAPI._count()`), so the two never count the same report.
+    (`LocalAPI._count()`), so the two never count the same report. The load
+    a thermostat knows was a few percent above what a power meter saw;
+    `set_load()` counts with a load of the caller's own.
 
 ## Tests
 

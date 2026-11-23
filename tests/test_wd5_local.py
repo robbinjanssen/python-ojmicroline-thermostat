@@ -577,7 +577,7 @@ async def test_usage_is_counted_where_the_cloud_does_not_hear_the_thermostat(
         username="py",
         password="test",
     )
-    WD5LocalAPI(
+    api = WD5LocalAPI(
         cloud,
         gateway,
         snapshot=_snapshot(),
@@ -619,8 +619,23 @@ async def test_usage_is_counted_where_the_cloud_does_not_hear_the_thermostat(
     assert used[-1] == (SERIAL, pytest.approx(4010 * 61 / 3_600_000))
 
     # A thermostat that did not tell its load cannot be counted.
+    assert api.load(OTHER) is None
     report(0, serial=OTHER, Heating=True)
     assert len(used) == 5
+
+    # Unless a load is set for it, which also goes before a thermostat's own.
+    api.set_load(OTHER, 500)
+    report(30, serial=OTHER, Heating=True)
+    assert used[-1] == (OTHER, pytest.approx(500 * 30 / 3_600_000))
+    assert api.load(SERIAL) == 4010
+    api.set_load(SERIAL, 3900)
+    assert api.load(SERIAL) == 3900
+    report(30, Heating=True)
+    assert used[-1] == (SERIAL, pytest.approx(3900 * 60 / 3_600_000))
+    # Without it the thermostat's own load counts again.
+    api.set_load(SERIAL, None)
+    report(60, Heating=True)
+    assert used[-1] == (SERIAL, pytest.approx(4010 * 60 / 3_600_000))
 
 
 async def test_usage_is_not_counted_without_a_listener(
